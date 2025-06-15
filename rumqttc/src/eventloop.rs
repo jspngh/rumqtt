@@ -1,19 +1,19 @@
-use crate::{framed::Network, Transport};
-use crate::{Incoming, MqttState, NetworkOptions, Packet, Request, StateError};
-use crate::{MqttOptions, Outgoing};
-
-use crate::framed::AsyncReadWrite;
-use crate::mqttbytes::v4::*;
-use flume::{bounded, Receiver, Sender};
-use tokio::net::{lookup_host, TcpSocket, TcpStream};
-use tokio::select;
-use tokio::time::{self, Instant, Sleep};
-
 use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::time::Duration;
+
+use flume::{bounded, Receiver, Sender};
+use rumqtt_bytes::{ConnAck, Connect, ConnectReasonCode, Packet, PingReq};
+use tokio::net::{lookup_host, TcpSocket, TcpStream};
+use tokio::select;
+use tokio::time::{self, Instant, Sleep};
+
+use crate::{
+    framed::{AsyncReadWrite, Network},
+    Incoming, MqttOptions, MqttState, NetworkOptions, Outgoing, Request, StateError, Transport,
+};
 
 #[cfg(unix)]
 use {std::path::Path, tokio::net::UnixStream};
@@ -52,7 +52,7 @@ pub enum ConnectionError {
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Connection refused, return code: `{0:?}`")]
-    ConnectionRefused(ConnectReturnCode),
+    ConnectionRefused(ConnectReasonCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
     NotConnAck(Packet),
     #[error("Requests done")]
@@ -377,8 +377,8 @@ async fn network_connect(
         let socket = UnixStream::connect(Path::new(file)).await?;
         let network = Network::new(
             socket,
-            options.max_incoming_packet_size,
-            options.max_outgoing_packet_size,
+            options.max_incoming_packet_size as u32,
+            options.max_outgoing_packet_size as u32,
         );
         return Ok(network);
     }
@@ -413,8 +413,8 @@ async fn network_connect(
     let network = match options.transport() {
         Transport::Tcp => Network::new(
             tcp_stream,
-            options.max_incoming_packet_size,
-            options.max_outgoing_packet_size,
+            options.max_incoming_packet_size as u32,
+            options.max_outgoing_packet_size as u32,
         ),
         #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
         Transport::Tls(tls_config) => {
@@ -423,8 +423,8 @@ async fn network_connect(
                     .await?;
             Network::new(
                 socket,
-                options.max_incoming_packet_size,
-                options.max_outgoing_packet_size,
+                options.max_incoming_packet_size as u32,
+                options.max_outgoing_packet_size as u32,
             )
         }
         #[cfg(unix)]
@@ -486,9 +486,11 @@ async fn mqtt_connect(
     options: &MqttOptions,
     network: &mut Network,
 ) -> Result<ConnAck, ConnectionError> {
-    let mut connect = Connect::new(options.client_id());
-    connect.keep_alive = options.keep_alive().as_secs() as u16;
-    connect.clean_session = options.clean_session();
+    let mut connect = Connect::new(
+        options.keep_alive().as_secs() as u16,
+        options.clean_session(),
+        options.client_id(),
+    );
     connect.last_will = options.last_will();
     connect.login = options.credentials();
 
@@ -498,7 +500,7 @@ async fn mqtt_connect(
 
     // validate connack
     match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => Ok(connack),
+        Incoming::ConnAck(connack) if connack.code == ConnectReasonCode::Success => Ok(connack),
         Incoming::ConnAck(connack) => Err(ConnectionError::ConnectionRefused(connack.code)),
         packet => Err(ConnectionError::NotConnAck(packet)),
     }

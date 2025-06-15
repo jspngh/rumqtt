@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use std::fmt::{self, Debug, Formatter};
 use std::time::Duration;
 #[cfg(feature = "websocket")]
@@ -8,16 +7,19 @@ use std::{
     sync::Arc,
 };
 
+use bytes::Bytes;
+use rumqtt_bytes::{
+    ConnectProperties, LastWill, Login, Packet, PubAck, PubComp, PubRec, PubRel, Publish, SubAck,
+    Subscribe, UnsubAck, Unsubscribe,
+};
+
 mod client;
 mod eventloop;
 mod framed;
-pub mod mqttbytes;
 mod state;
 
 use crate::Outgoing;
 use crate::{NetworkOptions, Transport};
-
-use mqttbytes::v5::*;
 
 pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
@@ -331,7 +333,7 @@ impl MqttOptions {
             conn_props.session_expiry_interval = interval;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.session_expiry_interval = interval;
             self.set_connect_properties(conn_props)
         }
@@ -352,7 +354,7 @@ impl MqttOptions {
             conn_props.receive_maximum = recv_max;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.receive_maximum = recv_max;
             self.set_connect_properties(conn_props)
         }
@@ -373,7 +375,7 @@ impl MqttOptions {
             conn_props.max_packet_size = max_size;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.max_packet_size = max_size;
             self.set_connect_properties(conn_props)
         }
@@ -394,7 +396,7 @@ impl MqttOptions {
             conn_props.topic_alias_max = topic_alias_max;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.topic_alias_max = topic_alias_max;
             self.set_connect_properties(conn_props)
         }
@@ -415,7 +417,7 @@ impl MqttOptions {
             conn_props.request_response_info = request_response_info;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.request_response_info = request_response_info;
             self.set_connect_properties(conn_props)
         }
@@ -436,7 +438,7 @@ impl MqttOptions {
             conn_props.request_problem_info = request_problem_info;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.request_problem_info = request_problem_info;
             self.set_connect_properties(conn_props)
         }
@@ -457,7 +459,7 @@ impl MqttOptions {
             conn_props.user_properties = user_properties;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.user_properties = user_properties;
             self.set_connect_properties(conn_props)
         }
@@ -481,7 +483,7 @@ impl MqttOptions {
             conn_props.authentication_method = authentication_method;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.authentication_method = authentication_method;
             self.set_connect_properties(conn_props)
         }
@@ -502,7 +504,7 @@ impl MqttOptions {
             conn_props.authentication_data = authentication_data;
             self
         } else {
-            let mut conn_props = ConnectProperties::new();
+            let mut conn_props = ConnectProperties::default();
             conn_props.authentication_data = authentication_data;
             self.set_connect_properties(conn_props)
         }

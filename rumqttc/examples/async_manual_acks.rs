@@ -1,8 +1,8 @@
-use tokio::{task, time};
-
-use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
 use std::error::Error;
 use std::time::Duration;
+
+use rumqttc::{AsyncClient, Event, EventLoop, Incoming, MqttOptions, QoS};
+use tokio::{task, time};
 
 fn create_conn() -> (AsyncClient, EventLoop) {
     let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);

@@ -1,28 +1,26 @@
 use futures_util::{FutureExt, SinkExt};
+use rumqtt_bytes::{Codec, Error, Packet, V5};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
+use super::{Incoming, MqttState, StateError};
 use crate::framed::AsyncReadWrite;
 
-use super::mqttbytes::v5::Packet;
-use super::{mqttbytes, Codec, Incoming, MqttState, StateError};
-
-/// Network transforms packets <-> frames efficiently. It takes
-/// advantage of pre-allocation, buffering and vectorization when
-/// appropriate to achieve performance
+/// Network transforms packets <-> frames efficiently.
+///
+/// It takes advantage of pre-allocation, buffering and vectorization
+/// when appropriate to achieve performance.
 pub struct Network {
     /// Frame MQTT packets from network connection
-    framed: Framed<Box<dyn AsyncReadWrite>, Codec>,
+    framed: Framed<Box<dyn AsyncReadWrite>, Codec<V5>>,
     /// Maximum readv count
     max_readb_count: usize,
 }
+
 impl Network {
-    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: Option<u32>) -> Network {
+    pub fn new(socket: impl AsyncReadWrite + 'static, max_incoming_size: u32) -> Network {
         let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
-        let codec = Codec {
-            max_incoming_size,
-            max_outgoing_size: None,
-        };
+        let codec = Codec::new(max_incoming_size, 268_435_460);
         let framed = Framed::new(socket, codec);
 
         Network {
@@ -31,7 +29,7 @@ impl Network {
         }
     }
 
-    pub fn set_max_outgoing_size(&mut self, max_outgoing_size: Option<u32>) {
+    pub fn set_max_outgoing_size(&mut self, max_outgoing_size: u32) {
         self.framed.codec_mut().max_outgoing_size = max_outgoing_size;
     }
 
@@ -39,7 +37,7 @@ impl Network {
     pub async fn read(&mut self) -> Result<Incoming, StateError> {
         match self.framed.next().await {
             Some(Ok(packet)) => Ok(packet),
-            Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
+            Some(Err(Error::InsufficientBytes(_))) => unreachable!(),
             Some(Err(e)) => Err(StateError::Deserialization(e)),
             None => Err(StateError::ConnectionAborted),
         }
@@ -63,7 +61,7 @@ impl Network {
                         break;
                     }
                 }
-                Some(Err(mqttbytes::Error::InsufficientBytes(_))) => unreachable!(),
+                Some(Err(Error::InsufficientBytes(_))) => unreachable!(),
                 Some(Err(e)) => return Err(StateError::Deserialization(e)),
                 None => return Err(StateError::ConnectionAborted),
             }

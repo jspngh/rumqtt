@@ -1,19 +1,17 @@
-use super::framed::Network;
-use super::mqttbytes::v5::*;
-use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
-use crate::eventloop::socket_connect;
-use crate::framed::AsyncReadWrite;
-
-use flume::{bounded, Receiver, Sender};
-use tokio::select;
-use tokio::time::{self, error::Elapsed, Instant, Sleep};
-
 use std::collections::VecDeque;
 use std::io;
 use std::pin::Pin;
 use std::time::Duration;
 
-use super::mqttbytes::v5::ConnectReturnCode;
+use flume::{bounded, Receiver, Sender};
+use rumqtt_bytes::{ConnAck, Connect, ConnectReasonCode, Packet};
+use tokio::select;
+use tokio::time::{self, error::Elapsed, Instant, Sleep};
+
+use super::framed::Network;
+use super::{Incoming, MqttOptions, MqttState, Outgoing, Request, StateError, Transport};
+use crate::eventloop::socket_connect;
+use crate::framed::AsyncReadWrite;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::tls;
@@ -50,7 +48,7 @@ pub enum ConnectionError {
     #[error("I/O: {0}")]
     Io(#[from] io::Error),
     #[error("Connection refused, return code: `{0:?}`")]
-    ConnectionRefused(ConnectReturnCode),
+    ConnectionRefused(ConnectReasonCode),
     #[error("Expected ConnAck packet, received: {0:?}")]
     NotConnAck(Box<Packet>),
     #[error("Requests done")]
@@ -289,12 +287,12 @@ async fn connect(options: &mut MqttOptions) -> Result<(Network, ConnAck), Connec
 }
 
 async fn network_connect(options: &MqttOptions) -> Result<Network, ConnectionError> {
-    let mut max_incoming_pkt_size = Some(options.default_max_incoming_size);
+    let mut max_incoming_pkt_size = options.default_max_incoming_size;
 
     // Override default value if max_packet_size is set on `connect_properties`
     if let Some(connect_props) = &options.connect_properties {
         if let Some(max_size) = connect_props.max_packet_size {
-            max_incoming_pkt_size = Some(max_size);
+            max_incoming_pkt_size = max_size;
         }
     }
 
@@ -398,16 +396,14 @@ async fn mqtt_connect(
     options: &mut MqttOptions,
     network: &mut Network,
 ) -> Result<ConnAck, ConnectionError> {
-    let packet = Packet::Connect(
-        Connect {
-            client_id: options.client_id(),
-            keep_alive: options.keep_alive().as_secs() as u16,
-            clean_start: options.clean_start(),
-            properties: options.connect_properties(),
-        },
-        options.last_will(),
-        options.credentials(),
-    );
+    let packet = Packet::Connect(Connect {
+        client_id: options.client_id(),
+        keep_alive: options.keep_alive().as_secs() as u16,
+        clean_start: options.clean_start(),
+        properties: options.connect_properties(),
+        last_will: options.last_will(),
+        login: options.credentials(),
+    });
 
     // send mqtt connect packet
     network.write(packet).await?;
@@ -415,12 +411,14 @@ async fn mqtt_connect(
 
     // validate connack
     match network.read().await? {
-        Incoming::ConnAck(connack) if connack.code == ConnectReturnCode::Success => {
+        Incoming::ConnAck(connack) if connack.code == ConnectReasonCode::Success => {
             if let Some(props) = &connack.properties {
                 if let Some(keep_alive) = props.server_keep_alive {
                     options.keep_alive = Duration::from_secs(keep_alive as u64);
                 }
-                network.set_max_outgoing_size(props.max_packet_size);
+                if let Some(max_outgoing_size) = props.max_packet_size {
+                    network.set_max_outgoing_size(max_outgoing_size);
+                }
 
                 // Override local session_expiry_interval value if set by server.
                 if props.session_expiry_interval.is_some() {

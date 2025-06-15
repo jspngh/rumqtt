@@ -105,12 +105,19 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
+use rumqtt_bytes::{
+    Disconnect, LastWill, Login, PingReq, PingResp, PubAck, PubComp, PubRec, PubRel, Publish,
+    SubAck, Subscribe, UnsubAck, Unsubscribe,
+};
+
 mod client;
 mod eventloop;
 mod framed;
-pub mod mqttbytes;
 mod state;
+mod topic;
 pub mod v5;
+
+pub use rumqtt_bytes::{Packet, QoS};
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 mod tls;
@@ -138,8 +145,6 @@ pub use client::{
     AsyncClient, Client, ClientError, Connection, Iter, RecvError, RecvTimeoutError, TryRecvError,
 };
 pub use eventloop::{ConnectionError, Event, EventLoop};
-pub use mqttbytes::v4::*;
-pub use mqttbytes::*;
 #[cfg(feature = "use-rustls")]
 use rustls_native_certs::load_native_certs;
 pub use state::{MqttState, StateError};

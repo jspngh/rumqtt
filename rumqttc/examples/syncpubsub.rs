@@ -1,6 +1,7 @@
-use rumqttc::{Client, LastWill, MqttOptions, QoS};
 use std::thread;
 use std::time::Duration;
+
+use rumqttc::{Client, LastWill, MqttOptions, QoS};
 
 fn main() {
     pretty_env_logger::init();

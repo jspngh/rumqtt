@@ -1,5 +1,6 @@
-use matches::assert_matches;
 use std::time::{Duration, Instant};
+
+use matches::assert_matches;
 use tokio::{task, time};
 
 mod broker;
@@ -132,7 +133,7 @@ async fn idle_connection_triggers_pings_on_time() {
     for _ in 0..3 {
         let packet = broker.read_packet().await.unwrap();
         match packet {
-            Packet::PingReq => {
+            Packet::PingReq(_) => {
                 count += 1;
                 let elapsed = start.elapsed();
                 assert_eq!(elapsed.as_secs(), { keep_alive });
@@ -176,7 +177,7 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
     loop {
         let event = broker.tick().await;
 
-        if event == Event::Incoming(Incoming::PingReq) {
+        if event == Event::Incoming(Incoming::PingReq(PingReq)) {
             // wait for 3 pings
             count += 1;
             if count == 3 {
@@ -215,7 +216,7 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
     loop {
         let event = broker.tick().await;
 
-        if event == Event::Incoming(Incoming::PingReq) {
+        if event == Event::Incoming(Incoming::PingReq(PingReq)) {
             // wait for 3 pings
             count += 1;
             if count == 3 {

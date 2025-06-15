@@ -1,10 +1,10 @@
-use rumqttc::v5::mqttbytes::v5::SubscribeProperties;
-use rumqttc::v5::mqttbytes::QoS;
-use tokio::{task, time};
-
-use rumqttc::v5::{AsyncClient, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
+
+use rumqtt_bytes::v5::SubscribeProperties;
+use rumqtt_bytes::{QoS, VarInt};
+use rumqttc::v5::{AsyncClient, MqttOptions};
+use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn requests(client: AsyncClient) {
     let props = SubscribeProperties {
-        id: Some(1),
+        subscription_id: Some(VarInt::constant(1)), // TODO
         user_properties: vec![],
     };
 
@@ -38,7 +38,7 @@ async fn requests(client: AsyncClient) {
         .unwrap();
 
     let props = SubscribeProperties {
-        id: Some(2),
+        subscription_id: Some(VarInt::new(2).unwrap()), // TODO
         user_properties: vec![],
     };
 
