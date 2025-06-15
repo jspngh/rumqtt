@@ -1,16 +1,16 @@
-use super::mqttbytes::v5::{
-    ConnAck, ConnectReturnCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
-    PubAckReason, PubComp, PubCompReason, PubRec, PubRecReason, PubRel, PubRelReason, Publish,
-    SubAck, Subscribe, SubscribeReasonCode, UnsubAck, UnsubAckReason, Unsubscribe,
-};
-use super::mqttbytes::{self, Error as MqttError, QoS};
-
-use super::{Event, Incoming, Outgoing, Request};
-
-use bytes::Bytes;
-use fixedbitset::FixedBitSet;
 use std::collections::{HashMap, VecDeque};
 use std::{io, time::Instant};
+
+use fixedbitset::FixedBitSet;
+use rumqtt_bytes::{
+    ConnAck, ConnectReasonCode, Disconnect, DisconnectReasonCode, Packet, PingReq, PubAck,
+    PubAckReasonCode, PubComp, PubCompReasonCode, PubRec, PubRecReasonCode, PubRel,
+    PubRelReasonCode, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck, Unsubscribe,
+    UnsubscribeReasonCode,
+};
+use rumqtt_bytes::{Error as MqttError, QoS};
+
+use super::{Event, Incoming, Outgoing, Request};
 
 /// Errors during state handling
 #[derive(Debug, thiserror::Error)]
@@ -52,12 +52,12 @@ pub enum StateError {
         reason_string: Option<String>,
     },
     #[error("Connection failed with reason '{reason:?}' ")]
-    ConnFail { reason: ConnectReturnCode },
+    ConnFail { reason: ConnectReasonCode },
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
 }
 
-impl From<mqttbytes::Error> for StateError {
+impl From<MqttError> for StateError {
     fn from(value: MqttError) -> Self {
         match value {
             MqttError::OutgoingPacketTooLarge { pkt_size, max } => {
@@ -103,7 +103,7 @@ pub struct MqttState {
     /// Indicates if acknowledgements should be send immediately
     pub manual_acks: bool,
     /// Map of alias_id->topic
-    topic_alises: HashMap<u16, Bytes>,
+    topic_aliases: HashMap<u16, String>,
     /// `topic_alias_maximum` RECEIVED via connack packet
     pub broker_topic_alias_max: u16,
     /// Maximum number of allowed inflight QoS1 & QoS2 requests
@@ -132,7 +132,7 @@ impl MqttState {
             // TODO: Optimize these sizes later
             events: VecDeque::with_capacity(100),
             manual_acks,
-            topic_alises: HashMap::new(),
+            topic_aliases: HashMap::new(),
             // Set via CONNACK
             broker_topic_alias_max: 0,
             max_outgoing_inflight: max_inflight,
@@ -153,7 +153,7 @@ impl MqttState {
 
         // remove and collect pending releases
         for pkid in self.outgoing_rel.ones() {
-            let request = Request::PubRel(PubRel::new(pkid as u16, None));
+            let request = Request::PubRel(PubRel::new(pkid as u16));
             pending.push(request);
         }
         self.outgoing_rel.clear();
@@ -235,7 +235,7 @@ impl MqttState {
         &mut self,
         suback: &mut SubAck,
     ) -> Result<Option<Packet>, StateError> {
-        for reason in suback.return_codes.iter() {
+        for reason in suback.reason_codes.iter() {
             match reason {
                 SubscribeReasonCode::Success(qos) => {
                     debug!("SubAck Pkid = {:?}, QoS = {:?}", suback.pkid, qos);
@@ -252,8 +252,8 @@ impl MqttState {
         &mut self,
         unsuback: &mut UnsubAck,
     ) -> Result<Option<Packet>, StateError> {
-        for reason in unsuback.reasons.iter() {
-            if reason != &UnsubAckReason::Success {
+        for reason in unsuback.reason_codes.iter() {
+            if reason != &UnsubscribeReasonCode::Success {
                 warn!("UnsubAck Pkid = {:?}, Reason = {:?}", unsuback.pkid, reason);
             }
         }
@@ -264,7 +264,7 @@ impl MqttState {
         &mut self,
         connack: &mut ConnAck,
     ) -> Result<Option<Packet>, StateError> {
-        if connack.code != ConnectReturnCode::Success {
+        if connack.code != ConnectReasonCode::Success {
             return Err(StateError::ConnFail {
                 reason: connack.code,
             });
@@ -316,10 +316,10 @@ impl MqttState {
 
         if !publish.topic.is_empty() {
             if let Some(alias) = topic_alias {
-                self.topic_alises.insert(alias, publish.topic.clone());
+                self.topic_aliases.insert(alias, publish.topic.clone());
             }
         } else if let Some(alias) = topic_alias {
-            if let Some(topic) = self.topic_alises.get(&alias) {
+            if let Some(topic) = self.topic_aliases.get(&alias) {
                 topic.clone_into(&mut publish.topic);
             } else {
                 self.handle_protocol_error()?;
@@ -330,7 +330,7 @@ impl MqttState {
             QoS::AtMostOnce => Ok(None),
             QoS::AtLeastOnce => {
                 if !self.manual_acks {
-                    let puback = PubAck::new(publish.pkid, None);
+                    let puback = PubAck::new(publish.pkid);
                     return self.outgoing_puback(puback);
                 }
                 Ok(None)
@@ -340,7 +340,7 @@ impl MqttState {
                 self.incoming_pub.insert(pkid as usize);
 
                 if !self.manual_acks {
-                    let pubrec = PubRec::new(pkid, None);
+                    let pubrec = PubRec::new(pkid);
                     return self.outgoing_pubrec(pubrec);
                 }
                 Ok(None)
@@ -361,8 +361,8 @@ impl MqttState {
 
         self.inflight -= 1;
 
-        if puback.reason != PubAckReason::Success
-            && puback.reason != PubAckReason::NoMatchingSubscribers
+        if puback.reason != PubAckReasonCode::Success
+            && puback.reason != PubAckReasonCode::NoMatchingSubscribers
         {
             warn!(
                 "PubAck Pkid = {:?}, reason: {:?}",
@@ -397,8 +397,8 @@ impl MqttState {
             return Err(StateError::Unsolicited(pubrec.pkid));
         }
 
-        if pubrec.reason != PubRecReason::Success
-            && pubrec.reason != PubRecReason::NoMatchingSubscribers
+        if pubrec.reason != PubRecReasonCode::Success
+            && pubrec.reason != PubRecReasonCode::NoMatchingSubscribers
         {
             warn!(
                 "PubRec Pkid = {:?}, reason: {:?}",
@@ -412,7 +412,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::PubRel(pubrec.pkid));
         self.events.push_back(event);
 
-        Ok(Some(Packet::PubRel(PubRel::new(pubrec.pkid, None))))
+        Ok(Some(Packet::PubRel(PubRel::new(pubrec.pkid))))
     }
 
     fn handle_incoming_pubrel(&mut self, pubrel: &PubRel) -> Result<Option<Packet>, StateError> {
@@ -422,7 +422,7 @@ impl MqttState {
         }
         self.incoming_pub.set(pubrel.pkid as usize, false);
 
-        if pubrel.reason != PubRelReason::Success {
+        if pubrel.reason != PubRelReasonCode::Success {
             warn!(
                 "PubRel Pkid = {:?}, reason: {:?}",
                 pubrel.pkid, pubrel.reason
@@ -433,7 +433,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::PubComp(pubrel.pkid));
         self.events.push_back(event);
 
-        Ok(Some(Packet::PubComp(PubComp::new(pubrel.pkid, None))))
+        Ok(Some(Packet::PubComp(PubComp::new(pubrel.pkid))))
     }
 
     fn handle_incoming_pubcomp(&mut self, pubcomp: &PubComp) -> Result<Option<Packet>, StateError> {
@@ -452,7 +452,7 @@ impl MqttState {
         }
         self.outgoing_rel.set(pubcomp.pkid as usize, false);
 
-        if pubcomp.reason != PubCompReason::Success {
+        if pubcomp.reason != PubCompReasonCode::Success {
             warn!(
                 "PubComp Pkid = {:?}, reason: {:?}",
                 pubcomp.pkid, pubcomp.reason
@@ -499,7 +499,7 @@ impl MqttState {
 
         debug!(
             "Publish. Topic = {}, Pkid = {:?}, Payload Size = {:?}",
-            String::from_utf8(publish.topic.to_vec()).unwrap(),
+            publish.topic,
             publish.pkid,
             publish.payload.len()
         );
@@ -533,7 +533,7 @@ impl MqttState {
         let event = Event::Outgoing(Outgoing::PubRel(pubrel.pkid));
         self.events.push_back(event);
 
-        Ok(Some(Packet::PubRel(PubRel::new(pubrel.pkid, None))))
+        Ok(Some(Packet::PubRel(PubRel::new(pubrel.pkid))))
     }
 
     fn outgoing_puback(&mut self, puback: PubAck) -> Result<Option<Packet>, StateError> {
@@ -628,13 +628,16 @@ impl MqttState {
 
     fn outgoing_disconnect(
         &mut self,
-        reason: DisconnectReasonCode,
+        reason_code: DisconnectReasonCode,
     ) -> Result<Option<Packet>, StateError> {
-        debug!("Disconnect with {:?}", reason);
+        debug!("Disconnect with {:?}", reason_code);
         let event = Event::Outgoing(Outgoing::Disconnect);
         self.events.push_back(event);
 
-        Ok(Some(Packet::Disconnect(Disconnect::new(reason))))
+        Ok(Some(Packet::Disconnect(Disconnect {
+            reason_code,
+            properties: None,
+        })))
     }
 
     fn check_collision(&mut self, pkid: u16) -> Option<Publish> {
@@ -684,10 +687,11 @@ impl MqttState {
 
 #[cfg(test)]
 mod test {
-    use super::mqttbytes::v5::*;
-    use super::mqttbytes::*;
     use super::{Event, Incoming, Outgoing, Request};
     use super::{MqttState, StateError};
+
+    use rumqtt_bytes::v5::*;
+    use rumqtt_bytes::QoS;
 
     fn build_outgoing_publish(qos: QoS) -> Publish {
         let topic = "hello/world".to_owned();

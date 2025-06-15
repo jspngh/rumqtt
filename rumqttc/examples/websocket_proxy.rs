@@ -1,5 +1,6 @@
-use rumqttc::{AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 use std::{error::Error, time::Duration};
+
+use rumqttc::{AsyncClient, Proxy, ProxyAuth, ProxyType, QoS, Transport};
 use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]

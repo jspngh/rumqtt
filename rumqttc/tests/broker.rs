@@ -1,16 +1,15 @@
-use rumqttc::mqttbytes::v4::*;
-use rumqttc::mqttbytes::*;
 use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
-use tokio::net::TcpListener;
-use tokio::select;
-use tokio::{task, time};
 
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender};
-use rumqttc::{Event, Incoming, Outgoing, Packet};
+use rumqtt_bytes::{v4::*, Error, Protocol};
+use rumqttc::{Event, Incoming, Outgoing, Packet, QoS};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::select;
+use tokio::{task, time};
 
 pub struct Broker {
     pub(crate) framed: Network,
@@ -84,8 +83,8 @@ impl Broker {
 
             match packet {
                 Packet::Publish(publish) => return Some(publish),
-                Packet::PingReq => {
-                    self.framed.write(Packet::PingResp).await.unwrap();
+                Packet::PingReq(_) => {
+                    self.framed.write(Packet::PingResp(PingResp)).await.unwrap();
                     continue;
                 }
                 packet => panic!("Expecting a publish. Received = {:?}", packet),
@@ -124,7 +123,7 @@ impl Broker {
 
     /// Sends an acknowledgement
     pub async fn pingresp(&mut self) {
-        let packet = Packet::PingResp;
+        let packet = Packet::PingResp(PingResp);
         self.framed.write(packet).await.unwrap();
     }
 
@@ -260,11 +259,11 @@ impl Network {
         match packet {
             Packet::Publish(packet) => packet.write(&mut self.write)?,
             Packet::PubRel(packet) => packet.write(&mut self.write)?,
-            Packet::PingReq => {
+            Packet::PingReq(_) => {
                 let packet = PingReq;
                 packet.write(&mut self.write)?
             }
-            Packet::PingResp => {
+            Packet::PingResp(_) => {
                 let packet = PingResp;
                 packet.write(&mut self.write)?
             }
@@ -272,7 +271,7 @@ impl Network {
             Packet::SubAck(packet) => packet.write(&mut self.write)?,
             Packet::Unsubscribe(packet) => packet.write(&mut self.write)?,
             Packet::UnsubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Disconnect => {
+            Packet::Disconnect(_) => {
                 let packet = Disconnect;
                 packet.write(&mut self.write)?
             }
@@ -298,9 +297,9 @@ fn outgoing(packet: &Packet) -> Outgoing {
         Packet::PubComp(pubcomp) => Outgoing::PubComp(pubcomp.pkid),
         Packet::Subscribe(subscribe) => Outgoing::Subscribe(subscribe.pkid),
         Packet::Unsubscribe(unsubscribe) => Outgoing::Unsubscribe(unsubscribe.pkid),
-        Packet::PingReq => Outgoing::PingReq,
-        Packet::PingResp => Outgoing::PingResp,
-        Packet::Disconnect => Outgoing::Disconnect,
+        Packet::PingReq(_) => Outgoing::PingReq,
+        Packet::PingResp(_) => Outgoing::PingResp,
+        Packet::Disconnect(_) => Outgoing::Disconnect,
         packet => panic!("Invalid outgoing packet = {:?}", packet),
     }
 }

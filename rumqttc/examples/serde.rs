@@ -1,9 +1,11 @@
-use bincode::ErrorKind;
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
-use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::thread;
 use std::time::{Duration, SystemTime};
+
+use bincode::ErrorKind;
+use bytes::Bytes;
+use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Message {
@@ -11,15 +13,15 @@ struct Message {
     time: SystemTime,
 }
 
-impl From<&Message> for Vec<u8> {
+impl From<&Message> for Bytes {
     fn from(value: &Message) -> Self {
-        bincode::serialize(value).unwrap()
+        Bytes::from(bincode::serialize(value).unwrap())
     }
 }
 
-impl From<Message> for Vec<u8> {
+impl From<Message> for Bytes {
     fn from(value: Message) -> Self {
-        bincode::serialize(&value).unwrap()
+        Bytes::from(bincode::serialize(&value).unwrap())
     }
 }
 

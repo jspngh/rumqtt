@@ -1,7 +1,8 @@
-use rumqttc::v5::mqttbytes::{v5::LastWill, QoS};
-use rumqttc::v5::{Client, MqttOptions};
 use std::thread;
 use std::time::Duration;
+
+use rumqtt_bytes::{v5::LastWill, QoS};
+use rumqttc::v5::{Client, MqttOptions};
 
 fn main() {
     pretty_env_logger::init();

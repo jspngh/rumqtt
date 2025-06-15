@@ -1,9 +1,9 @@
-use rumqttc::v5::mqttbytes::{v5::PublishProperties, QoS};
-use tokio::{task, time};
-
-use rumqttc::v5::{AsyncClient, MqttOptions};
 use std::error::Error;
 use std::time::Duration;
+
+use rumqtt_bytes::{v5::PublishProperties, QoS};
+use rumqttc::v5::{AsyncClient, MqttOptions};
+use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {

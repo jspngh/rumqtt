@@ -1,20 +1,18 @@
-//! This module offers a high level synchronous and asynchronous abstraction to
-//! async eventloop.
+//! This module offers a high level synchronous and asynchronous abstraction to async eventloop.
 use std::time::Duration;
-
-use super::mqttbytes::v5::{
-    Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
-    Unsubscribe, UnsubscribeProperties,
-};
-use super::mqttbytes::QoS;
-use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
-use crate::{valid_filter, valid_topic};
 
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
+use rumqtt_bytes::{
+    Filter, PubAck, PubRec, Publish, PublishProperties, QoS, Subscribe, SubscribeProperties,
+    Unsubscribe, UnsubscribeProperties,
+};
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
+
+use super::{ConnectionError, Event, EventLoop, MqttOptions, Request};
+use crate::topic::{valid_filter, valid_topic};
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -84,8 +82,9 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        publish.properties = properties;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -138,8 +137,9 @@ impl AsyncClient {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        publish.properties = properties;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
@@ -209,8 +209,9 @@ impl AsyncClient {
         S: Into<String>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        publish.properties = properties;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::TryRequest(publish));
@@ -255,7 +256,7 @@ impl AsyncClient {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
@@ -285,7 +286,7 @@ impl AsyncClient {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::TryRequest(subscribe.into()));
@@ -387,7 +388,8 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        unsubscribe.properties = properties;
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.send_async(request).await?;
         Ok(())
@@ -411,7 +413,8 @@ impl AsyncClient {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        unsubscribe.properties = properties;
         let request = Request::Unsubscribe(unsubscribe);
         self.request_tx.try_send(request)?;
         Ok(())
@@ -447,8 +450,8 @@ impl AsyncClient {
 fn get_ack_req(publish: &Publish) -> Option<Request> {
     let ack = match publish.qos {
         QoS::AtMostOnce => return None,
-        QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid, None)),
-        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid, None)),
+        QoS::AtLeastOnce => Request::PubAck(PubAck::new(publish.pkid)),
+        QoS::ExactlyOnce => Request::PubRec(PubRec::new(publish.pkid)),
     };
     Some(ack)
 }
@@ -509,8 +512,9 @@ impl Client {
         P: Into<Bytes>,
     {
         let topic = topic.into();
-        let mut publish = Publish::new(&topic, qos, payload, properties);
+        let mut publish = Publish::new(&topic, qos, payload);
         publish.retain = retain;
+        publish.properties = properties;
         let publish = Request::Publish(publish);
         if !valid_topic(&topic) {
             return Err(ClientError::Request(publish));
@@ -601,7 +605,7 @@ impl Client {
         qos: QoS,
         properties: Option<SubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let filter = Filter::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
         let subscribe = Subscribe::new(filter, properties);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
@@ -700,7 +704,8 @@ impl Client {
         topic: S,
         properties: Option<UnsubscribeProperties>,
     ) -> Result<(), ClientError> {
-        let unsubscribe = Unsubscribe::new(topic, properties);
+        let mut unsubscribe = Unsubscribe::new(topic.into());
+        unsubscribe.properties = properties;
         let request = Request::Unsubscribe(unsubscribe);
         self.client.request_tx.send(request)?;
         Ok(())
@@ -868,7 +873,7 @@ impl Iterator for Iter<'_> {
 
 #[cfg(test)]
 mod test {
-    use crate::v5::mqttbytes::v5::LastWill;
+    use rumqtt_bytes::v5::LastWill;
 
     use super::*;
 

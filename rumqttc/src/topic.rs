@@ -6,28 +6,24 @@ pub fn has_wildcards(s: &str) -> bool {
 /// Checks if a topic is valid
 pub fn valid_topic(topic: &str) -> bool {
     // topic can't contain wildcards
-    if topic.contains('+') || topic.contains('#') {
-        return false;
-    }
-
-    true
+    !has_wildcards(topic)
 }
 
-/// Checks if the filter is valid
+/// Checks if the topic filter is valid
 ///
-/// <https://docs.oasis-open.org/mqtt/mqtt/v3.1.1/os/mqtt-v3.1.1-os.html#_Toc398718106>
+/// See [specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901241)
 pub fn valid_filter(filter: &str) -> bool {
     if filter.is_empty() {
         return false;
     }
 
     // rev() is used so we can easily get the last entry
-    let mut hirerarchy = filter.split('/').rev();
+    let mut hierarchy = filter.split('/').rev();
 
     // split will never return an empty iterator
     // even if the pattern isn't matched, the original string will be there
     // so it is safe to just unwrap here!
-    let last = hirerarchy.next().unwrap();
+    let last = hierarchy.next().unwrap();
 
     // only single '#" or '+' is allowed in last entry
     // invalid: sport/tennis#
@@ -37,7 +33,7 @@ pub fn valid_filter(filter: &str) -> bool {
     }
 
     // remaining entries
-    for entry in hirerarchy {
+    for entry in hierarchy {
         // # is not allowed in filter except as a last entry
         // invalid: sport/tennis#/player
         // invalid: sport/tennis/#/ranking
@@ -55,7 +51,9 @@ pub fn valid_filter(filter: &str) -> bool {
     true
 }
 
-/// Checks if topic matches a filter. topic and filter validation isn't done here.
+/// Checks if topic matches a filter.
+///
+/// Topic and filter validation isn't done here.
 ///
 /// **NOTE**: 'topic' is a misnomer in the arg. this can also be used to match 2 wild subscriptions
 /// **NOTE**: make sure a topic is validated during a publish and filter is validated

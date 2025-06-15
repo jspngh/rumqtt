@@ -2,14 +2,16 @@
 //! async eventloop.
 use std::time::Duration;
 
-use crate::mqttbytes::{v4::*, QoS};
-use crate::{valid_filter, valid_topic, ConnectionError, Event, EventLoop, MqttOptions, Request};
-
 use bytes::Bytes;
 use flume::{SendError, Sender, TrySendError};
 use futures_util::FutureExt;
 use tokio::runtime::{self, Runtime};
 use tokio::time::timeout;
+
+use rumqtt_bytes::{Disconnect, Filter, PubAck, PubRec, Publish, Subscribe, Unsubscribe};
+
+use crate::topic::{valid_filter, valid_topic};
+use crate::{ConnectionError, Event, EventLoop, MqttOptions, QoS, Request};
 
 /// Client Error
 #[derive(Debug, thiserror::Error)]
@@ -75,7 +77,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        V: Into<Vec<u8>>,
+        V: Into<Bytes>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
@@ -98,7 +100,7 @@ impl AsyncClient {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        V: Into<Vec<u8>>,
+        V: Into<Bytes>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
@@ -141,7 +143,7 @@ impl AsyncClient {
     where
         S: Into<String>,
     {
-        let mut publish = Publish::from_bytes(topic, qos, payload);
+        let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
         let publish = Request::Publish(publish);
         self.request_tx.send_async(publish).await?;
@@ -150,7 +152,8 @@ impl AsyncClient {
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub async fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
+        let subscribe = Subscribe::new(filter, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
@@ -161,7 +164,8 @@ impl AsyncClient {
 
     /// Attempts to send a MQTT Subscribe to the `EventLoop`
     pub fn try_subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
+        let subscribe = Subscribe::new(filter, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
@@ -173,9 +177,9 @@ impl AsyncClient {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub async fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
@@ -187,9 +191,9 @@ impl AsyncClient {
     /// Attempts to send a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::TryRequest(subscribe.into()));
         }
@@ -215,14 +219,14 @@ impl AsyncClient {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub async fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect(Disconnect);
+        let request = Request::Disconnect(Disconnect::new());
         self.request_tx.send_async(request).await?;
         Ok(())
     }
 
     /// Attempts to send a MQTT disconnect to the `EventLoop`
     pub fn try_disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect(Disconnect);
+        let request = Request::Disconnect(Disconnect::new());
         self.request_tx.try_send(request)?;
         Ok(())
     }
@@ -288,7 +292,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        V: Into<Vec<u8>>,
+        V: Into<Bytes>,
     {
         let topic = topic.into();
         let mut publish = Publish::new(&topic, qos, payload);
@@ -310,7 +314,7 @@ impl Client {
     ) -> Result<(), ClientError>
     where
         S: Into<String>,
-        V: Into<Vec<u8>>,
+        V: Into<Bytes>,
     {
         self.client.try_publish(topic, qos, retain, payload)?;
         Ok(())
@@ -334,7 +338,8 @@ impl Client {
 
     /// Sends a MQTT Subscribe to the `EventLoop`
     pub fn subscribe<S: Into<String>>(&self, topic: S, qos: QoS) -> Result<(), ClientError> {
-        let subscribe = Subscribe::new(topic, qos);
+        let filter = Filter::new(topic.into(), qos);
+        let subscribe = Subscribe::new(filter, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
@@ -352,9 +357,9 @@ impl Client {
     /// Sends a MQTT Subscribe for multiple topics to the `EventLoop`
     pub fn subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
-        let subscribe = Subscribe::new_many(topics);
+        let subscribe = Subscribe::new_many(topics, None);
         if !subscribe_has_valid_filters(&subscribe) {
             return Err(ClientError::Request(subscribe.into()));
         }
@@ -365,7 +370,7 @@ impl Client {
 
     pub fn try_subscribe_many<T>(&self, topics: T) -> Result<(), ClientError>
     where
-        T: IntoIterator<Item = SubscribeFilter>,
+        T: IntoIterator<Item = Filter>,
     {
         self.client.try_subscribe_many(topics)
     }
@@ -386,7 +391,7 @@ impl Client {
 
     /// Sends a MQTT disconnect to the `EventLoop`
     pub fn disconnect(&self) -> Result<(), ClientError> {
-        let request = Request::Disconnect(Disconnect);
+        let request = Request::Disconnect(Disconnect::new());
         self.client.request_tx.send(request)?;
         Ok(())
     }
