@@ -1,39 +1,49 @@
 use futures_util::{FutureExt, SinkExt, StreamExt};
-use rumqtt_bytes::{Codec, Error, Packet, V4};
+use rumqtt_bytes::{Codec, Error, Packet, Protocol};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
-use crate::{Incoming, MqttState, StateError};
+use crate::{MqttState, StateError};
+
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
 /// Network transforms packets <-> frames efficiently.
 ///
 /// It takes advantage of pre-allocation, buffering and vectorization
 /// when appropriate to achieve performance.
-pub struct Network {
+pub struct Network<P: Protocol<Item = Packet>> {
     /// Frame MQTT packets from network connection
-    framed: Framed<Box<dyn AsyncReadWrite>, Codec<V4>>,
+    framed: Framed<Box<dyn AsyncReadWrite>, Codec<P>>,
     /// Maximum readv count
     max_readb_count: usize,
 }
 
-impl Network {
+impl<P: Protocol<Item = Packet>> Network<P> {
     pub fn new(
         socket: impl AsyncReadWrite + 'static,
         max_incoming_size: u32,
         max_outgoing_size: u32,
-    ) -> Network {
+    ) -> Self {
         let socket = Box::new(socket) as Box<dyn AsyncReadWrite>;
         let codec = Codec::new(max_incoming_size, max_outgoing_size);
         let framed = Framed::new(socket, codec);
 
-        Network {
+        Self {
             framed,
             max_readb_count: 10,
         }
     }
 
-    /// Reads and returns a single packet from network
-    pub async fn read(&mut self) -> Result<Incoming, StateError> {
+    /// Set the maximum size of outgoing packets.
+    ///
+    /// This information can be present in Connect/ConnAck packets.
+    pub fn set_max_outgoing_size(&mut self, max_outgoing_size: u32) {
+        self.framed.codec_mut().max_outgoing_size = max_outgoing_size;
+    }
+
+    /// Reads and returns a single packet from the network
+    pub async fn read(&mut self) -> Result<P::Item, StateError> {
         match self.framed.next().await {
             Some(Ok(packet)) => Ok(packet),
             Some(Err(Error::InsufficientBytes(_))) => unreachable!(),
@@ -42,8 +52,10 @@ impl Network {
         }
     }
 
-    /// Read packets in bulk. This allow replies to be in bulk. This method is used
-    /// after the connection is established to read a bunch of incoming packets
+    /// Read packets in bulk.
+    ///
+    /// This allow replies to be in bulk.
+    /// This method is used after the connection is established to read a bunch of incoming packets.
     pub async fn readb(&mut self, state: &mut MqttState) -> Result<(), StateError> {
         // wait for the first read
         let mut res = self.framed.next().await;
@@ -75,7 +87,7 @@ impl Network {
     }
 
     /// Serializes packet into write buffer
-    pub async fn write(&mut self, packet: Packet) -> Result<(), StateError> {
+    pub async fn write(&mut self, packet: P::Item) -> Result<(), StateError> {
         self.framed
             .feed(packet)
             .await
@@ -89,6 +101,3 @@ impl Network {
             .map_err(StateError::Deserialization)
     }
 }
-
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
