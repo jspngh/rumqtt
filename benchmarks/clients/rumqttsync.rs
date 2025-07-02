@@ -1,4 +1,4 @@
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{Client, Event, Incoming, OptionsBuilder, QoS};
 use std::error::Error;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -13,11 +13,13 @@ fn main() {
 }
 
 pub fn start(id: &str, payload_size: usize, count: usize) -> Result<(), Box<dyn Error>> {
-    let mut mqttoptions = MqttOptions::new(id, "localhost", 1883);
-    mqttoptions.set_keep_alive(Duration::from_secs(20));
-    mqttoptions.set_inflight(100);
+    let options = OptionsBuilder::new_tcp("localhost", 1883)
+        .client_id(id)
+        .keep_alive(Duration::from_secs(20))
+        .incoming_inflight(std::num::NonZero::new(100).unwrap())
+        .finalize();
 
-    let (client, mut connection) = Client::new(mqttoptions, 10);
+    let (client, mut connection) = Client::new(options, 10);
     thread::spawn(move || {
         for _i in 0..count {
             let payload = vec![0; payload_size];

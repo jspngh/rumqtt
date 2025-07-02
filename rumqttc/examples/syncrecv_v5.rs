@@ -1,19 +1,20 @@
 use std::thread;
 use std::time::Duration;
 
-use rumqtt_bytes::{v5::LastWill, QoS};
-use rumqttc::v5::{Client, MqttOptions};
+use rumqtt_bytes::{LastWill, V5};
+use rumqttc::{Client, OptionsBuilder, QoS};
 
 fn main() {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
-    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false, None);
-    mqttoptions
-        .set_keep_alive(Duration::from_secs(5))
-        .set_last_will(will);
+    let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
+    let options = OptionsBuilder::new_tcp("localhost", 1884)
+        .client_id("test-1")
+        .keep_alive(Duration::from_secs(5))
+        .last_will(will)
+        .finalize();
 
-    let (client, mut connection) = Client::new(mqttoptions, 10);
+    let (client, mut connection) = Client::new_v5(options, 10);
     thread::spawn(move || publish(client));
 
     if let Ok(notification) = connection.recv() {
@@ -29,7 +30,7 @@ fn main() {
     }
 }
 
-fn publish(client: Client) {
+fn publish(client: Client<V5>) {
     client.subscribe("hello/+/world", QoS::AtMostOnce).unwrap();
     for i in 0..3 {
         let payload = vec![1; i];

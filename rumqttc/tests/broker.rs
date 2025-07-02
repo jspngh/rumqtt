@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use bytes::BytesMut;
 use flume::{bounded, Receiver, Sender};
-use rumqtt_bytes::{v4::*, Error, Protocol};
-use rumqttc::{Event, Incoming, Outgoing, Packet, QoS};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::select;
 use tokio::{task, time};
+
+use rumqtt_bytes::*;
+use rumqttc::{Event, Incoming, Outgoing};
 
 pub struct Broker {
     pub(crate) framed: Network,
@@ -33,11 +34,8 @@ impl Broker {
         match incoming.pop_front().unwrap() {
             Packet::Connect(connect) => {
                 let connack = match connack {
-                    0 => ConnAck::new(
-                        ConnectReturnCode::Success,
-                        !connect.clean_session && session_saved,
-                    ),
-                    1 => ConnAck::new(ConnectReturnCode::BadUserNamePassword, false),
+                    0 => ConnAck::new(!connect.clean_start && session_saved),
+                    1 => ConnAck::from_return_code(ConnectReturnCode::BadUserNamePassword, false),
                     _ => {
                         return Broker {
                             framed,
@@ -48,7 +46,7 @@ impl Broker {
                     }
                 };
 
-                framed.connack(connack).await.unwrap();
+                framed.connack(Packet::ConnAck(connack)).await.unwrap();
             }
             _ => {
                 panic!("Expecting connect packet");
@@ -218,9 +216,9 @@ impl Network {
         }
     }
 
-    pub async fn connack(&mut self, connack: ConnAck) -> io::Result<usize> {
+    pub async fn connack(&mut self, connack: Packet) -> io::Result<usize> {
         let mut write = BytesMut::new();
-        let len = match connack.write(&mut write) {
+        let len = match V5::write(connack, &mut write, 1024) {
             Ok(size) => size,
             Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         };
@@ -234,7 +232,7 @@ impl Network {
     pub async fn readb(&mut self, incoming: &mut VecDeque<Incoming>) -> io::Result<()> {
         let mut count = 0;
         loop {
-            match Packet::read(&mut self.read, self.max_incoming_size) {
+            match V5::read(&mut self.read, self.max_incoming_size) {
                 Ok(packet) => {
                     incoming.push_back(packet);
                     count += 1;
@@ -256,34 +254,9 @@ impl Network {
     #[inline]
     async fn write(&mut self, packet: Packet) -> Result<Outgoing, Error> {
         let outgoing = outgoing(&packet);
-        match packet {
-            Packet::Publish(packet) => packet.write(&mut self.write)?,
-            Packet::PubRel(packet) => packet.write(&mut self.write)?,
-            Packet::PingReq(_) => {
-                let packet = PingReq;
-                packet.write(&mut self.write)?
-            }
-            Packet::PingResp(_) => {
-                let packet = PingResp;
-                packet.write(&mut self.write)?
-            }
-            Packet::Subscribe(packet) => packet.write(&mut self.write)?,
-            Packet::SubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Unsubscribe(packet) => packet.write(&mut self.write)?,
-            Packet::UnsubAck(packet) => packet.write(&mut self.write)?,
-            Packet::Disconnect(_) => {
-                let packet = Disconnect;
-                packet.write(&mut self.write)?
-            }
-            Packet::PubAck(packet) => packet.write(&mut self.write)?,
-            Packet::PubRec(packet) => packet.write(&mut self.write)?,
-            Packet::PubComp(packet) => packet.write(&mut self.write)?,
-            _ => unimplemented!(),
-        };
-
+        V5::write(packet, &mut self.write, 1024)?;
         self.socket.write_all(&self.write[..]).await.unwrap();
         self.write.clear();
-
         Ok(outgoing)
     }
 }

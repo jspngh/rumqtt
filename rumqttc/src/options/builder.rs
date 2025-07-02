@@ -667,6 +667,13 @@ mod test {
     use super::*;
 
     #[test]
+    #[should_panic] // TODO
+    fn random_client_id() {
+        let options = OptionsBuilder::new_tcp("localhost", 1883).finalize();
+        assert!(options.client_id().starts_with("todo"));
+    }
+
+    #[test]
     #[cfg(all(feature = "use-rustls", feature = "websocket"))]
     fn no_scheme() {
         let mut mqttoptions = MqttOptions::new("client_a", "a3f8czas.iot.eu-west-1.amazonaws.com/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=MyCreds%2F20201001%2Feu-west-1%2Fiotdevicegateway%2Faws4_request&X-Amz-Date=20201001T130812Z&X-Amz-Expires=7200&X-Amz-Signature=9ae09b49896f44270f2707551581953e6cac71a4ccf34c7c3415555be751b2d1&X-Amz-SignedHeaders=host", 443);
@@ -747,17 +754,5 @@ mod test {
             err("mqtt://host:42?client_id=foo&inflight_num=foo"),
             OptionError::Inflight
         );
-    }
-
-    #[test]
-    fn accept_empty_client_id() {
-        let _mqtt_opts = MqttOptions::new("", "127.0.0.1", 1883).set_clean_session(true);
-    }
-
-    #[test]
-    fn set_clean_session_when_client_id_present() {
-        let mut options = MqttOptions::new("client_id", "127.0.0.1", 1883);
-        options.set_clean_session(false);
-        options.set_clean_session(true);
     }
 }
