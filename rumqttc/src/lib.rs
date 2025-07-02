@@ -9,14 +9,16 @@
 //! ----------------------------
 //!
 //! ```no_run
-//! use rumqttc::{MqttOptions, Client, QoS};
+//! use rumqttc::{OptionBuilder, Client, QoS};
 //! use std::time::Duration;
 //! use std::thread;
 //!
-//! let mut mqttoptions = MqttOptions::new("rumqtt-sync", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! let options = OptionBuilder::new_tcp("test.mosquitto.org", 1883)
+//!     .client_id("rumqtt-sync")
+//!     .keep_alive(Duration::from_secs(5))
+//!     .finalize();
 //!
-//! let (mut client, mut connection) = Client::new(mqttoptions, 10);
+//! let (mut client, mut connection) = Client::new(options, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
 //! thread::spawn(move || for i in 0..10 {
 //!    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, vec![i; i as usize]).unwrap();
@@ -33,17 +35,19 @@
 //! ------------------------------
 //!
 //! ```no_run
-//! use rumqttc::{MqttOptions, AsyncClient, QoS};
+//! use rumqttc::{OptionBuilder, AsyncClient, QoS};
 //! use tokio::{task, time};
 //! use std::time::Duration;
 //! use std::error::Error;
 //!
 //! # #[tokio::main(flavor = "current_thread")]
 //! # async fn main() {
-//! let mut mqttoptions = MqttOptions::new("rumqtt-async", "test.mosquitto.org", 1883);
-//! mqttoptions.set_keep_alive(Duration::from_secs(5));
+//! let options = OptionBuilder::new_tcp("test.mosquitto.org", 1883)
+//!     .client_id("rumqtt-async")
+//!     .keep_alive(Duration::from_secs(5))
+//!     .finalize();
 //!
-//! let (mut client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+//! let (mut client, mut eventloop) = AsyncClient::new(options, 10);
 //! client.subscribe("hello/rumqtt", QoS::AtMostOnce).await.unwrap();
 //!
 //! task::spawn(async move {

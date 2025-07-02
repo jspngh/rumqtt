@@ -1,19 +1,22 @@
 use std::error::Error;
 use std::time::Duration;
 
-use rumqtt_bytes::{v5::Packet, QoS};
-use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
+use rumqttc::{
+    v5::{AsyncClient, EventLoop},
+    Event, OptionBuilder, Packet, QoS,
+};
 use tokio::{task, time};
 
 fn create_conn() -> (AsyncClient, EventLoop) {
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
-    mqttoptions
-        .set_keep_alive(Duration::from_secs(5))
-        .set_session_expiry_interval(u32::MAX.into())
-        .set_manual_acks(true)
-        .set_clean_start(false);
+    let options = OptionBuilder::new_tcp("localhost", 1884)
+        .client_id("test-1")
+        .keep_alive(Duration::from_secs(5))
+        .session_expiry_interval(u32::MAX)
+        .manual_acks(true)
+        .clean_start(false)
+        .finalize();
 
-    AsyncClient::new(mqttoptions, 10)
+    AsyncClient::new_v5(options, 10)
 }
 
 #[tokio::main(flavor = "current_thread")]

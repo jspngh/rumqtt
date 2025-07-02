@@ -449,17 +449,21 @@ fn subscribe_has_valid_filters(subscribe: &Subscribe) -> bool {
 mod test {
     use super::*;
 
+    use crate::OptionBuilder;
+    use rumqtt_bytes::LastWill;
+
     #[test]
     fn calling_iter_twice_on_connection_shouldnt_panic() {
         use std::time::Duration;
 
-        let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
         let will = LastWill::new("hello/world", "good bye", QoS::AtMostOnce, false);
-        mqttoptions
-            .set_keep_alive(Duration::from_secs(5))
-            .set_last_will(will);
+        let options = OptionBuilder::new_tcp("localhost", 1883)
+            .client_id("test-1")
+            .keep_alive(Duration::from_secs(5))
+            .last_will(will)
+            .finalize();
 
-        let (_, mut connection) = Client::new(mqttoptions, 10);
+        let (_, mut connection) = Client::new(options, 10);
         let _ = connection.iter();
         let _ = connection.iter();
     }
@@ -467,7 +471,7 @@ mod test {
     #[test]
     fn should_be_able_to_build_test_client_from_channel() {
         let (tx, rx) = flume::bounded(1);
-        let client = Client::from_sender(tx);
+        let client = v5::Client::from_sender(tx);
         client
             .publish("hello/world", QoS::ExactlyOnce, false, "good bye")
             .expect("Should be able to publish");

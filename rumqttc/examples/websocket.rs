@@ -1,6 +1,6 @@
 use std::{error::Error, time::Duration};
 
-use rumqttc::{AsyncClient, MqttOptions, QoS, Transport};
+use rumqttc::{AsyncClient, OptionBuilder, QoS};
 use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]
@@ -8,15 +8,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     // port parameter is ignored when scheme is websocket
-    let mut mqttoptions = MqttOptions::new(
-        "clientId-aSziq39Bp3",
-        "ws://broker.mqttdashboard.com:8000/mqtt",
-        8000,
-    );
-    mqttoptions.set_transport(Transport::Ws);
-    mqttoptions.set_keep_alive(Duration::from_secs(60));
+    let options = OptionBuilder::new_ws("ws://broker.mqttdashboard.com:8000/mqtt", 8000)
+        .client_id("clientId-aSziq39Bp3")
+        .keep_alive(Duration::from_secs(60))
+        .finalize();
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new(options, 10);
     task::spawn(async move {
         requests(client).await;
         time::sleep(Duration::from_secs(3)).await;

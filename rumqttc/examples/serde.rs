@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use bincode::ErrorKind;
 use bytes::Bytes;
-use rumqttc::{Client, Event, Incoming, MqttOptions, QoS};
+use rumqttc::{Client, Event, Incoming, OptionBuilder, QoS};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -34,9 +34,11 @@ impl TryFrom<&[u8]> for Message {
 }
 
 fn main() {
-    let mqqt_opts = MqttOptions::new("test-1", "localhost", 1883);
+    let options = OptionBuilder::new_tcp("localhost", 1883)
+        .client_id("test-1")
+        .finalize();
 
-    let (client, mut connection) = Client::new(mqqt_opts, 10);
+    let (client, mut connection) = Client::new(options, 10);
     client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
     thread::spawn(move || {
         for i in 0..10 {

@@ -1,17 +1,13 @@
 //! Example of how to configure rumqttc to connect to a server using TLS and authentication.
 use std::error::Error;
 
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, Transport};
+use rumqttc::{AsyncClient, Event, Incoming, OptionBuilder};
 use tokio_rustls::rustls::ClientConfig;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     color_backtrace::install();
-
-    let mut mqttoptions = MqttOptions::new("test-1", "mqtt.example.server", 8883);
-    mqttoptions.set_keep_alive(std::time::Duration::from_secs(5));
-    mqttoptions.set_credentials("username", "password");
 
     // Use rustls-native-certs to load root certificates from the operating system.
     let mut root_cert_store = tokio_rustls::rustls::RootCertStore::empty();
@@ -23,9 +19,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_root_certificates(root_cert_store)
         .with_no_client_auth();
 
-    mqttoptions.set_transport(Transport::tls_with_config(client_config.into()));
+    let options = OptionBuilder::new_tls("mqtt.example.server", 8883, client_config.into())
+        .client_id("test-1")
+        .keep_alive(std::time::Duration::from_secs(5))
+        .credentials("username", "password")
+        .finalize();
 
-    let (_client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (_client, mut eventloop) = AsyncClient::new(options, 10);
 
     loop {
         match eventloop.poll().await {

@@ -1,26 +1,27 @@
 use std::error::Error;
 use std::time::Duration;
 
-use rumqtt_bytes::v5::SubscribeProperties;
-use rumqtt_bytes::{QoS, VarInt};
-use rumqttc::v5::{AsyncClient, MqttOptions};
+use rumqtt_bytes::{SubscribeProperties, VarInt};
+use rumqttc::{v5::AsyncClient, OptionBuilder, QoS};
 use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1884);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    let options = OptionBuilder::new_tcp("localhost", 1884)
+        .client_id("test-1")
+        .keep_alive(Duration::from_secs(5))
+        .finalize();
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new_v5(options, 10);
     task::spawn(async move {
         requests(client).await;
         time::sleep(Duration::from_secs(3)).await;
     });
 
     while let Ok(event) = eventloop.poll().await {
-        println!("{:?}", event);
+        println!("{event:?}");
     }
 
     Ok(())

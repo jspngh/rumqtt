@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::time::Duration;
 
-use rumqttc::{AsyncClient, MqttOptions, QoS};
+use rumqttc::{AsyncClient, OptionBuilder, QoS};
 use tokio::{task, time};
 
 #[tokio::main(flavor = "current_thread")]
@@ -9,12 +9,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     // color_backtrace::install();
 
-    let mut mqttoptions = MqttOptions::new("test-1", "localhost", 1883);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    let options = OptionBuilder::new_tcp("localhost", 1883)
+        .client_id("test-1")
+        .keep_alive(Duration::from_secs(5))
+        .finalize();
 
-    let (client, mut eventloop) = AsyncClient::new(mqttoptions, 10);
+    let (client, mut eventloop) = AsyncClient::new(options, 10);
     task::spawn(async move {
-        requests(client).await;
+        requests(&client).await;
         time::sleep(Duration::from_secs(3)).await;
     });
 
@@ -32,7 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn requests(client: AsyncClient) {
+async fn requests(client: &AsyncClient) {
     client
         .subscribe("hello/world", QoS::AtMostOnce)
         .await
