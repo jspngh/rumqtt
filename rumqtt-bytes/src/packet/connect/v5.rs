@@ -1,8 +1,21 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::{Connect, ConnectProperties, LastWill, LastWillProperties, Login};
+use super::{Connect, Login};
 use crate::parse::*;
-use crate::{Error, FixedHeader, QoS};
+use crate::property::{Properties, PropertyType};
+use crate::{Error, FixedHeader};
+
+const ALLOWED_PROPERTIES: &[PropertyType] = &[
+    PropertyType::SessionExpiryInterval,
+    PropertyType::ReceiveMaximum,
+    PropertyType::MaximumPacketSize,
+    PropertyType::TopicAliasMaximum,
+    PropertyType::RequestResponseInformation,
+    PropertyType::RequestProblemInformation,
+    PropertyType::UserProperty,
+    PropertyType::AuthenticationMethod,
+    PropertyType::AuthenticationData,
+];
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
     let protocol_name = read_mqtt_bytes(&mut bytes)?;
@@ -19,7 +32,7 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Err
     let clean_start = (connect_flags & 0b10) != 0;
     let keep_alive = read_u16(&mut bytes)?;
 
-    let properties = ConnectProperties::read(&mut bytes)?;
+    let properties = Properties::read(&mut bytes, ALLOWED_PROPERTIES)?;
 
     let client_id = read_mqtt_string(&mut bytes)?;
     let last_will = will::read(connect_flags, &mut bytes)?;
@@ -30,8 +43,8 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Err
         clean_start,
         properties,
         client_id,
-        last_will,
-        login,
+        last_will: last_will.map(Box::new),
+        login: login.map(Box::new),
     })
 }
 
@@ -51,13 +64,8 @@ pub fn write(packet: &Connect, buffer: &mut BytesMut) -> Result<usize, Error> {
     buffer.put_u8(connect_flags);
     // keep alive time
     buffer.put_u16(packet.keep_alive);
-
     // properties
-    if let Some(p) = &packet.properties {
-        p.write(buffer)?;
-    } else {
-        buffer.put_u8(0);
-    }
+    packet.properties.write(buffer)?;
 
     // client identifier
     write_mqtt_string(buffer, &packet.client_id);
@@ -83,12 +91,8 @@ pub fn len(packet: &Connect) -> Result<VarInt, Error> {
                 + 1  // connect flags
                 + 2; // keep alive
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     len += 2 + packet.client_id.len();
 
@@ -106,7 +110,24 @@ pub fn len(packet: &Connect) -> Result<VarInt, Error> {
 }
 
 mod will {
-    use super::*;
+    use bytes::{Bytes, BytesMut};
+
+    use crate::{
+        packet::LastWill,
+        parse::*,
+        property::{Properties, PropertyType},
+        Error, QoS,
+    };
+
+    const ALLOWED_PROPERTIES: &[PropertyType] = &[
+        PropertyType::WillDelayInterval,
+        PropertyType::PayloadFormatIndicator,
+        PropertyType::MessageExpiryInterval,
+        PropertyType::ContentType,
+        PropertyType::ResponseTopic,
+        PropertyType::CorrelationData,
+        PropertyType::UserProperty,
+    ];
 
     impl LastWill {
         pub fn new_v5(
@@ -114,14 +135,13 @@ mod will {
             payload: impl Into<Vec<u8>>,
             qos: QoS,
             retain: bool,
-            properties: Option<LastWillProperties>,
         ) -> Self {
             Self {
                 topic: topic.into(),
                 payload: Bytes::from(payload.into()),
                 qos,
                 retain,
-                properties,
+                properties: Properties::new(),
             }
         }
     }
@@ -134,7 +154,7 @@ mod will {
             0 => None,
             _ => {
                 // Properties in variable header
-                let properties = LastWillProperties::read(bytes)?;
+                let properties = Properties::read(bytes, ALLOWED_PROPERTIES)?;
 
                 let topic = read_mqtt_string(bytes)?;
                 let payload = read_mqtt_bytes(bytes)?;
@@ -159,11 +179,7 @@ mod will {
             connect_flags |= 0x20;
         }
 
-        if let Some(p) = &packet.properties {
-            p.write(buffer)?;
-        } else {
-            buffer.put_u8(0);
-        }
+        packet.properties.write(buffer)?;
 
         write_mqtt_string(buffer, &packet.topic);
         write_mqtt_bytes(buffer, &packet.payload);
@@ -173,12 +189,8 @@ mod will {
     pub fn len(packet: &LastWill) -> Result<usize, Error> {
         let mut len = 2 + packet.topic.len() + 2 + packet.payload.len();
 
-        if let Some(p) = &packet.properties {
-            let properties_len = p.len()?;
-            len += properties_len.length() + properties_len.value();
-        } else {
-            len += 1; // 0 property length
-        }
+        let properties_len = packet.properties.len()?;
+        len += properties_len.length() + properties_len.value();
 
         Ok(len)
     }
@@ -194,19 +206,22 @@ mod test {
         size_from_len,
         tests::{USER_PROP_KEY, USER_PROP_VAL},
     };
+    use crate::{properties, Property};
 
     #[test]
     fn length_calculation() {
         let mut dummy_bytes = BytesMut::new();
-        let mut connect_props = ConnectProperties::default();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        connect_props.user_properties = vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())];
+        let connect_props = properties![Property::UserProperty {
+            name: USER_PROP_KEY.into(),
+            value: USER_PROP_VAL.into(),
+        }];
         let connect_pkt = Connect {
             keep_alive: 5,
             client_id: "client".into(),
             clean_start: true,
-            properties: Some(connect_props),
+            properties: connect_props,
             last_will: None,
             login: None,
         };

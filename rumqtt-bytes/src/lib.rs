@@ -19,6 +19,7 @@ pub use codec::Codec;
 pub use error::Error;
 pub use packet::*;
 pub use parse::VarInt;
+pub use property::{Properties, Property};
 
 use header::FixedHeader;
 

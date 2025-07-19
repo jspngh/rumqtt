@@ -2,7 +2,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use super::{ConnAck, ConnectReturnCode};
 use crate::parse::*;
-use crate::{Error, FixedHeader};
+use crate::{Error, FixedHeader, Properties};
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<ConnAck, Error> {
     let flags = read_u8(&mut bytes)?;
@@ -13,7 +13,7 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<ConnAck, Err
     Ok(ConnAck {
         session_present,
         code: code.into(),
-        properties: None,
+        properties: Properties::new(),
     })
 }
 

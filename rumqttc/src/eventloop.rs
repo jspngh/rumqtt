@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use flume::{bounded, Receiver, Sender};
 use rumqtt_bytes::Protocol;
-use rumqtt_bytes::{ConnAck, ConnectReasonCode, Packet};
+use rumqtt_bytes::{ConnAck, ConnectReasonCode, Packet, Property};
 use tokio::net::{lookup_host, TcpSocket, TcpStream};
 use tokio::time::{self, error::Elapsed, Instant, Sleep};
 
@@ -153,9 +153,12 @@ impl<P: Protocol<Item = Packet>> EventLoop<P> {
                 self.pending.clear();
             }
 
-            if let Some(max_size) = connack.properties.as_ref().and_then(|p| p.max_packet_size) {
-                log::debug!("Server sets maximum packet size of {max_size}");
-                network.set_max_outgoing_size(max_size);
+            for property in &connack.properties {
+                if let Property::MaximumPacketSize(max_size) = property {
+                    log::debug!("Server sets maximum packet size of {max_size}");
+                    network.set_max_outgoing_size(*max_size);
+                    break;
+                }
             }
 
             if self.keepalive_timeout.is_none() && !self.mqtt_options.keep_alive.is_zero() {
@@ -485,8 +488,8 @@ async fn mqtt_connect<P: Protocol<Item = Packet>>(
         options.clean_session(),
         options.client_id(),
     );
-    connect.last_will = options.last_will().cloned();
-    connect.login = options.credentials().cloned();
+    connect.last_will = options.last_will().map(|x| Box::new(x.clone()));
+    connect.login = options.credentials().map(|x| Box::new(x.clone()));
     connect.properties = options.connect_options.properties.clone();
 
     // send mqtt connect packet
@@ -496,18 +499,18 @@ async fn mqtt_connect<P: Protocol<Item = Packet>>(
     // validate connack
     match network.read().await? {
         Packet::ConnAck(connack) if connack.code == ConnectReasonCode::Success => {
-            if let Some(props) = &connack.properties {
-                if let Some(keep_alive) = props.server_keep_alive {
-                    options.keep_alive = Duration::from_secs(keep_alive as u64);
-                }
-                if let Some(max_outgoing_size) = props.max_packet_size {
-                    network.set_max_outgoing_size(max_outgoing_size);
-                }
-
-                // Override local session_expiry_interval value if set by server.
-                if props.session_expiry_interval.is_some() {
-                    // TODO: keep track of the interval set by the server?
-                    // options.set_session_expiry_interval(props.session_expiry_interval);
+            for property in &connack.properties {
+                match property {
+                    Property::ServerKeepAlive(keep_alive) => {
+                        options.keep_alive = Duration::from_secs(*keep_alive as u64);
+                    }
+                    Property::MaximumPacketSize(max) => {
+                        network.set_max_outgoing_size(*max);
+                    }
+                    Property::SessionExpiryInterval(_interval) => {
+                        // TODO: keep track of the interval set by the server?
+                    }
+                    _ => {}
                 }
             }
             Ok(connack)

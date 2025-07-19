@@ -1,7 +1,19 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::{Publish, PublishProperties};
+use super::Publish;
+use crate::property::{Properties, PropertyType};
 use crate::{parse::*, Error, FixedHeader, QoS};
+
+const ALLOWED_PROPERTIES: &[PropertyType] = &[
+    PropertyType::PayloadFormatIndicator,
+    PropertyType::MessageExpiryInterval,
+    PropertyType::TopicAlias,
+    PropertyType::ResponseTopic,
+    PropertyType::CorrelationData,
+    PropertyType::UserProperty,
+    PropertyType::SubscriptionIdentifier,
+    PropertyType::ContentType,
+];
 
 pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Error> {
     let dup = (fixed_header.flags() & 0b1000) != 0;
@@ -20,7 +32,7 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Erro
         return Err(Error::PacketIdZero);
     }
 
-    let properties = PublishProperties::read(&mut bytes)?;
+    let properties = Properties::read(&mut bytes, ALLOWED_PROPERTIES)?;
     Ok(Publish {
         dup,
         qos,
@@ -55,11 +67,7 @@ pub fn write(packet: &Publish, buffer: &mut BytesMut) -> Result<usize, Error> {
     }
 
     // properties
-    if let Some(p) = &packet.properties {
-        p.write(buffer)?;
-    } else {
-        buffer.put_u8(0);
-    }
+    packet.properties.write(buffer)?;
 
     buffer.extend_from_slice(&packet.payload);
 
@@ -73,12 +81,8 @@ pub fn len(packet: &Publish) -> Result<VarInt, Error> {
         len += 2;
     }
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     len += packet.payload.len();
     VarInt::new(len)
@@ -94,25 +98,23 @@ mod test {
         size_from_len,
         tests::{USER_PROP_KEY, USER_PROP_VAL},
     };
+    use crate::{properties, Property};
 
     #[test]
     fn length_calculation() {
         let mut dummy_bytes = BytesMut::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        let publish_props = PublishProperties {
-            payload_format_indicator: None,
-            message_expiry_interval: None,
-            topic_alias: None,
-            response_topic: None,
-            correlation_data: None,
-            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
-            subscription_ids: vec![VarInt::new(1).unwrap()],
-            content_type: None,
-        };
+        let publish_props = properties![
+            Property::UserProperty {
+                name: USER_PROP_KEY.into(),
+                value: USER_PROP_VAL.into(),
+            },
+            Property::SubscriptionIdentifier(VarInt::new(1).unwrap()),
+        ];
 
         let mut publish_pkt = Publish::new("hello/world", QoS::AtMostOnce, vec![1; 10]);
-        publish_pkt.properties = Some(publish_props);
+        publish_pkt.properties = publish_props;
 
         let size_from_size = size_from_len(len(&publish_pkt).unwrap());
         let size_from_write = write(&publish_pkt, &mut dummy_bytes).unwrap();

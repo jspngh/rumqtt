@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::{Filter, RetainForwardRule, Subscribe};
-use crate::{parse::*, Error, FixedHeader};
+use crate::{parse::*, Error, FixedHeader, Properties};
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Subscribe, Error> {
     let pkid = read_u16(&mut bytes)?;
@@ -26,7 +26,7 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Subscribe, E
         _ => Ok(Subscribe {
             pkid,
             filters,
-            properties: None,
+            properties: Properties::new(),
         }),
     }
 }
@@ -61,7 +61,7 @@ mod test {
 
     use super::*;
     use crate::packet::V4;
-    use crate::{Packet, Protocol, QoS};
+    use crate::{Packet, Properties, Protocol, QoS};
 
     #[test]
     fn subscribe_parsing_works() {
@@ -105,7 +105,7 @@ mod test {
                     Filter::new("#".to_owned(), QoS::AtLeastOnce),
                     Filter::new("a/b/c".to_owned(), QoS::ExactlyOnce)
                 ],
-                properties: None,
+                properties: Properties::new(),
             })
         );
     }
@@ -119,7 +119,7 @@ mod test {
                 Filter::new("#".to_owned(), QoS::AtLeastOnce),
                 Filter::new("a/b/c".to_owned(), QoS::ExactlyOnce),
             ],
-            properties: None,
+            properties: Properties::new(),
         };
 
         let mut buf = BytesMut::new();

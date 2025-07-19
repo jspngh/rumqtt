@@ -31,7 +31,7 @@ mod test {
 
     use super::*;
     use crate::packet::V4;
-    use crate::{Packet, Protocol, PubAckReasonCode};
+    use crate::{Packet, Properties, Protocol, PubAckReasonCode};
 
     #[test]
     fn puback_encoding_works() {
@@ -52,7 +52,7 @@ mod test {
             Packet::PubAck(PubAck {
                 pkid: 10,
                 reason: PubAckReasonCode::Success,
-                properties: None
+                properties: Properties::new(),
             })
         );
     }

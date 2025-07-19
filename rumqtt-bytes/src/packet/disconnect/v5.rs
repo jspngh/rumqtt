@@ -1,7 +1,18 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::{Disconnect, DisconnectProperties, DisconnectReasonCode};
-use crate::{parse::*, Error, FixedHeader};
+use super::{Disconnect, DisconnectReasonCode};
+use crate::{
+    parse::*,
+    property::{Properties, PropertyType},
+    Error, FixedHeader,
+};
+
+const ALLOWED_PROPERTIES: &[PropertyType] = &[
+    PropertyType::SessionExpiryInterval,
+    PropertyType::ReasonString,
+    PropertyType::UserProperty,
+    PropertyType::ServerReference,
+];
 
 pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Disconnect, Error> {
     if fixed_header.flags() != 0x00 {
@@ -17,13 +28,13 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Disconnect, E
         // Property length is omitted, no properties
         return Ok(Disconnect {
             reason_code: reason_code.try_into()?,
-            properties: None,
+            properties: Properties::new(),
         });
     }
 
     Ok(Disconnect {
         reason_code: reason_code.try_into()?,
-        properties: DisconnectProperties::read(&mut bytes)?,
+        properties: Properties::read(&mut bytes, ALLOWED_PROPERTIES)?,
     })
 }
 
@@ -38,11 +49,7 @@ pub fn write(packet: &Disconnect, buffer: &mut BytesMut) -> Result<usize, Error>
         // reason code
         buffer.put_u8(packet.reason_code as u8);
         // properties
-        if let Some(p) = &packet.properties {
-            p.write(buffer)?;
-        } else {
-            buffer.put_u8(0);
-        }
+        packet.properties.write(buffer)?;
     }
 
     Ok(1 + len.length() + len.value())
@@ -50,19 +57,15 @@ pub fn write(packet: &Disconnect, buffer: &mut BytesMut) -> Result<usize, Error>
 
 pub fn len(packet: &Disconnect) -> Result<VarInt, Error> {
     if packet.reason_code == DisconnectReasonCode::NormalDisconnection
-        && packet.properties.is_none()
+        && packet.properties.is_empty()
     {
         return VarInt::new(0); // No variable header
     }
 
     let mut len = 1; // reason code
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     VarInt::new(len)
 }
@@ -78,7 +81,7 @@ mod test {
         tests::{USER_PROP_KEY, USER_PROP_VAL},
         v5::V5,
     };
-    use crate::{Packet, Protocol};
+    use crate::{properties, Packet, Property, Protocol};
 
     #[test]
     fn disconnect1_parsing_works() {
@@ -110,17 +113,19 @@ mod test {
     }
 
     fn sample2() -> Disconnect {
-        let properties = DisconnectProperties {
-            // TODO: change to 2137 xD
-            session_expiry_interval: Some(1234),
-            reason_string: Some("test".to_owned()),
-            user_properties: vec![("test".to_owned(), "test".to_owned())],
-            server_reference: Some("test".to_owned()),
-        };
+        let properties = properties![
+            Property::SessionExpiryInterval(1234), // TODO: change to 2137 xD
+            Property::ReasonString("test".to_owned()),
+            Property::UserProperty {
+                name: "test".to_owned(),
+                value: "test".to_owned(),
+            },
+            Property::ServerReference("test".to_owned()),
+        ];
 
         Disconnect {
             reason_code: DisconnectReasonCode::UnspecifiedError,
-            properties: Some(properties),
+            properties,
         }
     }
 
@@ -167,15 +172,13 @@ mod test {
         let mut dummy_bytes = BytesMut::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        let disconn_props = DisconnectProperties {
-            session_expiry_interval: None,
-            reason_string: None,
-            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
-            server_reference: None,
-        };
+        let properties = properties![Property::UserProperty {
+            name: USER_PROP_KEY.to_owned(),
+            value: USER_PROP_VAL.to_owned(),
+        }];
 
         let mut disconn_pkt = Disconnect::new();
-        disconn_pkt.properties = Some(disconn_props);
+        disconn_pkt.properties = properties;
 
         let size_from_size = size_from_len(len(&disconn_pkt).unwrap());
         let size_from_write = write(&disconn_pkt, &mut dummy_bytes).unwrap();

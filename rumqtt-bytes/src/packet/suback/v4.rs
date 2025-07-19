@@ -47,7 +47,7 @@ mod test {
 
     use super::*;
     use crate::packet::V4;
-    use crate::{Packet, Protocol, QoS, SubscribeReasonCode};
+    use crate::{Packet, Properties, Protocol, QoS, SubscribeReasonCode};
 
     #[test]
     fn suback_parsing_works() {
@@ -65,7 +65,7 @@ mod test {
             packet,
             Packet::SubAck(SubAck {
                 pkid: 15,
-                properties: None,
+                properties: Properties::new(),
                 reason_codes: vec![
                     SubscribeReasonCode::Success(QoS::AtLeastOnce),
                     SubscribeReasonCode::Unspecified,

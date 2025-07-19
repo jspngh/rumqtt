@@ -1,6 +1,6 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use crate::{parse::*, property::PropertyType, Error, QoS};
+use crate::{parse::*, Error, Properties, QoS};
 
 pub(crate) mod v4;
 pub(crate) mod v5;
@@ -12,14 +12,45 @@ pub(crate) mod v5;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub pkid: u16,
-    pub properties: Option<SubscribeProperties>,
+    pub properties: Properties,
     pub filters: Vec<Filter>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubscribeProperties {
-    pub subscription_id: Option<VarInt>,
-    pub user_properties: Vec<(String, String)>,
+impl Subscribe {
+    pub fn new(filter: Filter, properties: Option<Properties>) -> Self {
+        Self {
+            pkid: 0,
+            filters: vec![filter],
+            properties: properties.unwrap_or_default(),
+        }
+    }
+
+    pub fn from_string<S: Into<String>>(path: S, qos: QoS) -> Subscribe {
+        let filter = Filter {
+            path: path.into(),
+            qos,
+            nolocal: false,
+            preserve_retain: false,
+            retain_forward_rule: RetainForwardRule::OnEverySubscribe,
+        };
+
+        Subscribe {
+            pkid: 0,
+            filters: vec![filter],
+            properties: Properties::new(),
+        }
+    }
+
+    pub fn new_many<F>(filters: F, properties: Option<Properties>) -> Self
+    where
+        F: IntoIterator<Item = Filter>,
+    {
+        Self {
+            pkid: 0,
+            filters: filters.into_iter().collect(),
+            properties: properties.unwrap_or_default(),
+        }
+    }
 }
 
 /// Subscription filter
@@ -37,125 +68,6 @@ pub enum RetainForwardRule {
     OnEverySubscribe,
     OnNewSubscribe,
     Never,
-}
-
-impl Subscribe {
-    pub fn new(filter: Filter, properties: Option<SubscribeProperties>) -> Self {
-        Self {
-            pkid: 0,
-            filters: vec![filter],
-            properties,
-        }
-    }
-
-    pub fn from_string<S: Into<String>>(path: S, qos: QoS) -> Subscribe {
-        let filter = Filter {
-            path: path.into(),
-            qos,
-            nolocal: false,
-            preserve_retain: false,
-            retain_forward_rule: RetainForwardRule::OnEverySubscribe,
-        };
-
-        Subscribe {
-            pkid: 0,
-            filters: vec![filter],
-            properties: None,
-        }
-    }
-
-    pub fn new_many<F>(filters: F, properties: Option<SubscribeProperties>) -> Self
-    where
-        F: IntoIterator<Item = Filter>,
-    {
-        Self {
-            pkid: 0,
-            filters: filters.into_iter().collect(),
-            properties,
-        }
-    }
-}
-
-impl SubscribeProperties {
-    fn len(&self) -> Result<VarInt, Error> {
-        let mut len = 0;
-
-        if let Some(id) = &self.subscription_id {
-            len += 1 + id.length();
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            len += 1 + 2 + key.len() + 2 + value.len();
-        }
-
-        VarInt::new(len)
-    }
-
-    pub fn read(bytes: &mut Bytes) -> Result<Option<SubscribeProperties>, Error> {
-        let mut id = None;
-        let mut user_properties = Vec::new();
-
-        let properties_len = VarInt::read(bytes.iter())?;
-        bytes.advance(properties_len.length());
-
-        if properties_len == 0 {
-            return Ok(None);
-        }
-
-        let mut cursor = 0;
-        // read until cursor reaches property length. properties_len = 0 will skip this loop
-        while properties_len > cursor {
-            let prop = read_u8(bytes)?;
-            cursor += 1;
-
-            match prop.try_into()? {
-                PropertyType::SubscriptionIdentifier => {
-                    let sub_id = VarInt::read(bytes.iter())?;
-                    if sub_id.value() == 0 {
-                        return Err(Error::SubscriptionIdZero);
-                    }
-
-                    cursor += sub_id.length();
-                    bytes.advance(sub_id.length());
-                    id = Some(sub_id);
-                }
-                PropertyType::UserProperty => {
-                    let key = read_mqtt_string(bytes)?;
-                    let value = read_mqtt_string(bytes)?;
-                    cursor += 2 + key.len() + 2 + value.len();
-                    user_properties.push((key, value));
-                }
-                _ => return Err(Error::InvalidPropertyType(prop)),
-            }
-        }
-
-        Ok(Some(SubscribeProperties {
-            subscription_id: id,
-            user_properties,
-        }))
-    }
-
-    pub fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = self.len()?;
-        len.write(buffer);
-
-        if let Some(id) = &self.subscription_id {
-            if id.value() == 0 {
-                return Err(Error::SubscriptionIdZero);
-            }
-
-            buffer.put_u8(PropertyType::SubscriptionIdentifier as u8);
-            id.write(buffer);
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
-            write_mqtt_string(buffer, key);
-            write_mqtt_string(buffer, value);
-        }
-
-        Ok(())
-    }
 }
 
 impl Filter {

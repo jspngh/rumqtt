@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::time::Duration;
 
-use rumqtt_bytes::PublishProperties;
+use rumqtt_bytes::{properties, Property};
 use rumqttc::{v5::AsyncClient, OptionBuilder, QoS};
 use tokio::{task, time};
 
@@ -39,11 +39,7 @@ async fn requests(client: AsyncClient) {
         .await
         .unwrap();
 
-    let props = PublishProperties {
-        topic_alias: Some(28),
-        ..Default::default()
-    };
-
+    let props = properties![Property::TopicAlias(28)];
     client
         .publish_with_properties(
             "hello/world",
@@ -55,9 +51,7 @@ async fn requests(client: AsyncClient) {
         .await
         .unwrap();
 
-    let mut other_props = props.clone();
-    other_props.topic_alias = Some(51);
-
+    let other_props = properties![Property::TopicAlias(51)];
     client
         .publish_with_properties(
             "bye/world",

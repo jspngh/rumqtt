@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::time::Duration;
 
-use rumqtt_bytes::{SubscribeProperties, VarInt};
+use rumqtt_bytes::{properties, Property, VarInt};
 use rumqttc::{v5::AsyncClient, OptionBuilder, QoS};
 use tokio::{task, time};
 
@@ -28,20 +28,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn requests(client: AsyncClient) {
-    let props = SubscribeProperties {
-        subscription_id: Some(VarInt::constant(1)), // TODO
-        user_properties: vec![],
-    };
+    let props = properties![Property::SubscriptionIdentifier(VarInt::constant(1))];
 
     client
         .subscribe_with_properties("hello/world", QoS::AtMostOnce, props)
         .await
         .unwrap();
 
-    let props = SubscribeProperties {
-        subscription_id: Some(VarInt::new(2).unwrap()), // TODO
-        user_properties: vec![],
-    };
+    let props = properties![Property::SubscriptionIdentifier(VarInt::constant(2))];
 
     client
         .subscribe_with_properties("hello/#", QoS::AtMostOnce, props)
@@ -69,7 +63,7 @@ async fn requests(client: AsyncClient) {
 
     // we will receive two publishes
     // but only one will have subscription ID
-    // cuz we unsubscribed to hello/# and then
+    // because we unsubscribed to hello/# and then
     // subscribed without properties!
     client
         .publish(

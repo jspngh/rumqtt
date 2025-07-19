@@ -1,7 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
 use super::{Connect, LastWill, Login};
-use crate::parse::*;
+use crate::{parse::*, Properties};
 use crate::{Error, FixedHeader, QoS};
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Error> {
@@ -26,10 +26,10 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Connect, Err
     Ok(Connect {
         keep_alive,
         clean_start: clean_session,
-        properties: None,
+        properties: Properties::new(),
         client_id,
-        last_will,
-        login,
+        last_will: last_will.map(Box::new),
+        login: login.map(Box::new),
     })
 }
 
@@ -104,7 +104,7 @@ mod will {
                 payload: Bytes::from(payload.into()),
                 qos,
                 retain,
-                properties: None,
+                properties: Properties::new(),
             }
         }
     }
@@ -120,13 +120,7 @@ mod will {
                 let payload = read_mqtt_bytes(bytes)?;
                 let qos = QoS::try_from((connect_flags & 0b11000) >> 3)?;
                 let retain = (connect_flags & 0b0010_0000) != 0;
-                Some(LastWill {
-                    topic,
-                    payload,
-                    qos,
-                    retain,
-                    properties: None,
-                })
+                Some(LastWill::new(topic, payload, qos, retain))
             }
         };
 

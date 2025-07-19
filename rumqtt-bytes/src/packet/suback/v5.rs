@@ -1,11 +1,18 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use super::{SubAck, SubAckProperties};
-use crate::{parse::*, Error, FixedHeader};
+use super::SubAck;
+use crate::{
+    parse::*,
+    property::{Properties, PropertyType},
+    Error, FixedHeader,
+};
+
+const ALLOWED_PROPERTIES: &[PropertyType] =
+    &[PropertyType::ReasonString, PropertyType::UserProperty];
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<SubAck, Error> {
     let pkid = read_u16(&mut bytes)?;
-    let properties = SubAckProperties::read(&mut bytes)?;
+    let properties = Properties::read(&mut bytes, ALLOWED_PROPERTIES)?;
 
     if !bytes.has_remaining() {
         return Err(Error::MalformedPacket);
@@ -32,13 +39,8 @@ pub fn write(packet: &SubAck, buffer: &mut BytesMut) -> Result<usize, Error> {
     len.write(buffer);
     // packet identifier
     buffer.put_u16(packet.pkid);
-
     // properties
-    if let Some(p) = &packet.properties {
-        p.write(buffer)?;
-    } else {
-        buffer.put_u8(0);
-    }
+    packet.properties.write(buffer)?;
 
     // return codes
     let p = packet.reason_codes.iter().map(|&c| u8::from(c));
@@ -50,12 +52,8 @@ pub fn write(packet: &SubAck, buffer: &mut BytesMut) -> Result<usize, Error> {
 pub fn len(packet: &SubAck) -> Result<VarInt, Error> {
     let mut len = 2 + packet.reason_codes.len();
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     VarInt::new(len)
 }
@@ -71,22 +69,22 @@ mod test {
         tests::{USER_PROP_KEY, USER_PROP_VAL},
         SubscribeReasonCode,
     };
-    use crate::QoS;
+    use crate::{properties, Property, QoS};
 
     #[test]
     fn length_calculation() {
         let mut dummy_bytes = BytesMut::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        let suback_props = SubAckProperties {
-            reason_string: None,
-            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
-        };
+        let properties = properties![Property::UserProperty {
+            name: USER_PROP_KEY.into(),
+            value: USER_PROP_VAL.into(),
+        }];
 
         let suback_pkt = SubAck {
             pkid: 1,
             reason_codes: vec![SubscribeReasonCode::Success(QoS::ExactlyOnce)],
-            properties: Some(suback_props),
+            properties,
         };
 
         let size_from_size = size_from_len(len(&suback_pkt).unwrap());

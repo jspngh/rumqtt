@@ -3,11 +3,8 @@
 use bytes::Bytes;
 use flume::Sender;
 
-use rumqtt_bytes::Protocol;
-use rumqtt_bytes::{
-    Disconnect, Filter, PubAck, PubRec, Publish, PublishProperties, Subscribe, SubscribeProperties,
-    Unsubscribe, UnsubscribeProperties,
-};
+use rumqtt_bytes::{Disconnect, Filter, PubAck, PubRec, Publish, Subscribe, Unsubscribe};
+use rumqtt_bytes::{Properties, Protocol};
 
 use crate::topic::{valid_filter, valid_topic};
 use crate::{v5, EventLoop, MqttOptions, Packet, QoS};
@@ -102,14 +99,16 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
         qos: QoS,
         retain: bool,
         payload: impl Into<Bytes>,
-        properties: Option<PublishProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let topic = topic.into();
         let valid_topic = valid_topic(&topic);
 
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        publish.properties = properties;
+        if let Some(properties) = properties {
+            publish.properties = properties;
+        }
         let publish = Packet::Publish(publish);
 
         if valid_topic {
@@ -137,14 +136,16 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
         qos: QoS,
         retain: bool,
         payload: impl Into<Bytes>,
-        properties: Option<PublishProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let topic = topic.into();
         let valid_topic = valid_topic(&topic);
 
         let mut publish = Publish::new(topic, qos, payload);
         publish.retain = retain;
-        publish.properties = properties;
+        if let Some(properties) = properties {
+            publish.properties = properties;
+        }
         let publish = Packet::Publish(publish);
 
         if valid_topic {
@@ -173,7 +174,7 @@ impl v5::AsyncClient {
         qos: QoS,
         retain: bool,
         payload: impl Into<Bytes>,
-        properties: PublishProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_publish(topic, qos, retain, payload, Some(properties))
             .await
@@ -185,7 +186,7 @@ impl v5::AsyncClient {
         qos: QoS,
         retain: bool,
         payload: impl Into<Bytes>,
-        properties: PublishProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_try_publish(topic, qos, retain, payload, Some(properties))
     }
@@ -222,7 +223,7 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
         &self,
         topic: impl Into<String>,
         qos: QoS,
-        properties: Option<SubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic.into(), qos);
         let subscribe = Subscribe::new(filter, properties);
@@ -245,7 +246,7 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
         &self,
         topic: impl Into<String>,
         qos: QoS,
-        properties: Option<SubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let filter = Filter::new(topic.into(), qos);
         let subscribe = Subscribe::new(filter, properties);
@@ -265,7 +266,7 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
     async fn handle_subscribe_many<T>(
         &self,
         topics: T,
-        properties: Option<SubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
@@ -293,7 +294,7 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
     fn handle_try_subscribe_many<T>(
         &self,
         topics: T,
-        properties: Option<SubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
@@ -320,7 +321,7 @@ impl v5::AsyncClient {
         &self,
         topic: impl Into<String>,
         qos: QoS,
-        properties: SubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_subscribe(topic, qos, Some(properties)).await
     }
@@ -329,7 +330,7 @@ impl v5::AsyncClient {
         &self,
         topic: impl Into<String>,
         qos: QoS,
-        properties: SubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_try_subscribe(topic, qos, Some(properties))
     }
@@ -337,7 +338,7 @@ impl v5::AsyncClient {
     pub async fn subscribe_many_with_properties<T>(
         &self,
         topics: T,
-        properties: SubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
@@ -348,7 +349,7 @@ impl v5::AsyncClient {
     pub fn try_subscribe_many_with_properties<T>(
         &self,
         topics: T,
-        properties: SubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError>
     where
         T: IntoIterator<Item = Filter>,
@@ -362,10 +363,12 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
     async fn handle_unsubscribe(
         &self,
         topic: impl Into<String>,
-        properties: Option<UnsubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let mut unsubscribe = Unsubscribe::new(topic);
-        unsubscribe.properties = properties;
+        if let Some(properties) = properties {
+            unsubscribe.properties = properties;
+        }
         self.request_tx
             .send_async(Packet::Unsubscribe(unsubscribe))
             .await?;
@@ -380,10 +383,12 @@ impl<P: Protocol<Item = Packet>> AsyncClient<P> {
     fn handle_try_unsubscribe<S: Into<String>>(
         &self,
         topic: S,
-        properties: Option<UnsubscribeProperties>,
+        properties: Option<Properties>,
     ) -> Result<(), ClientError> {
         let mut unsubscribe = Unsubscribe::new(topic);
-        unsubscribe.properties = properties;
+        if let Some(properties) = properties {
+            unsubscribe.properties = properties;
+        }
         self.request_tx.try_send(Packet::Unsubscribe(unsubscribe))?;
         Ok(())
     }
@@ -397,7 +402,7 @@ impl v5::AsyncClient {
     pub async fn unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
-        properties: UnsubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_unsubscribe(topic, Some(properties)).await
     }
@@ -405,7 +410,7 @@ impl v5::AsyncClient {
     pub fn try_unsubscribe_with_properties<S: Into<String>>(
         &self,
         topic: S,
-        properties: UnsubscribeProperties,
+        properties: Properties,
     ) -> Result<(), ClientError> {
         self.handle_try_unsubscribe(topic, Some(properties))
     }

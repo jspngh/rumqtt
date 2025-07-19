@@ -2,13 +2,13 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use fixedbitset::FixedBitSet;
-use rumqtt_bytes::Error as MqttError;
 use rumqtt_bytes::{
     ConnAck, ConnectReasonCode, Disconnect, DisconnectReasonCode, PingReq, PubAck,
     PubAckReasonCode, PubComp, PubCompReasonCode, PubRec, PubRecReasonCode, PubRel,
-    PubRelReasonCode, Publish, QoS, SubAck, Subscribe, SubscribeReasonCode, UnsubAck, Unsubscribe,
+    PubRelReasonCode, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck, Unsubscribe,
     UnsubscribeReasonCode,
 };
+use rumqtt_bytes::{Error as MqttError, Properties, QoS};
 
 use crate::{Event, Outgoing, Packet};
 
@@ -238,7 +238,7 @@ impl MqttState {
         // send DISCONNECT packet with REASON_CODE 0x82
         self.outgoing_disconnect(Disconnect {
             reason_code: DisconnectReasonCode::ProtocolError,
-            properties: None,
+            properties: Properties::new(),
         })
     }
 
@@ -281,15 +281,17 @@ impl MqttState {
             });
         }
 
-        if let Some(props) = &connack.properties {
-            if let Some(topic_alias_max) = props.topic_alias_max {
-                self.broker_topic_alias_max = topic_alias_max
-            }
-            if let Some(max_inflight) = props.receive_max {
-                self.max_outgoing_inflight =
-                    max_inflight.min(self.max_outgoing_inflight_upper_limit);
-                // FIXME: Maybe resize the pubrec and pubrel queues here
-                // to save some space.
+        for property in &connack.properties {
+            match *property {
+                rumqtt_bytes::Property::TopicAliasMaximum(max) => {
+                    self.broker_topic_alias_max = max;
+                }
+                rumqtt_bytes::Property::ReceiveMaximum(max) => {
+                    self.max_outgoing_inflight = max.min(self.max_outgoing_inflight_upper_limit);
+                    // FIXME: Maybe resize the pubrec and pubrel queues here
+                    // to save some space.
+                }
+                _ => {}
             }
         }
         Ok(None)
@@ -299,13 +301,14 @@ impl MqttState {
         &mut self,
         disconn: &mut Disconnect,
     ) -> Result<Option<Packet>, StateError> {
-        let reason_code = disconn.reason_code;
-        let reason_string = disconn
-            .properties
-            .as_ref()
-            .and_then(|a| a.reason_string.clone());
+        let mut reason_string = None;
+        for prop in &disconn.properties {
+            if let rumqtt_bytes::Property::ReasonString(reason) = prop {
+                reason_string = Some(reason.clone());
+            }
+        }
         Err(StateError::ServerDisconnect {
-            reason_code,
+            reason_code: disconn.reason_code,
             reason_string,
         })
     }
@@ -318,15 +321,18 @@ impl MqttState {
         &mut self,
         publish: &mut Publish,
     ) -> Result<Option<Packet>, StateError> {
-        // handle topic alias
-        if let Some(alias) = publish.properties.as_ref().and_then(|p| p.topic_alias) {
-            if !publish.topic.is_empty() {
-                self.topic_aliases.insert(alias, publish.topic.clone());
-            } else if let Some(topic) = self.topic_aliases.get(&alias) {
-                topic.clone_into(&mut publish.topic);
-            } else {
-                self.handle_protocol_error()?;
-            };
+        for property in &publish.properties {
+            // handle topic alias
+            if let rumqtt_bytes::Property::TopicAlias(alias) = property {
+                if !publish.topic.is_empty() {
+                    self.topic_aliases.insert(*alias, publish.topic.clone());
+                } else if let Some(topic) = self.topic_aliases.get(alias) {
+                    topic.clone_into(&mut publish.topic);
+                } else {
+                    // TODO: return here?
+                    self.handle_protocol_error()?;
+                };
+            }
         }
 
         // handle puback
@@ -506,16 +512,18 @@ impl MqttState {
             publish.payload.len()
         );
 
-        if let Some(alias) = publish.properties.as_ref().and_then(|p| p.topic_alias) {
-            if alias > self.broker_topic_alias_max {
-                // We MUST NOT send a Topic Alias that is greater than the
-                // broker's Topic Alias Maximum.
-                return Err(StateError::InvalidAlias {
-                    alias,
-                    max: self.broker_topic_alias_max,
-                });
+        for property in &publish.properties {
+            if let rumqtt_bytes::Property::TopicAlias(alias) = property {
+                if *alias > self.broker_topic_alias_max {
+                    // We MUST NOT send a Topic Alias that is greater than the
+                    // broker's Topic Alias Maximum.
+                    return Err(StateError::InvalidAlias {
+                        alias: *alias,
+                        max: self.broker_topic_alias_max,
+                    });
+                }
             }
-        };
+        }
 
         let event = Event::Outgoing(Outgoing::Publish(publish.pkid));
         self.events.push_back(event);

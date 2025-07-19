@@ -483,7 +483,7 @@ async fn next_poll_after_connect_failure_reconnects() {
         Ok(Event::Incoming(Packet::ConnAck(ConnAck {
             session_present: false,
             code: ConnectReasonCode::Success,
-            properties: None,
+            properties: _,
         }))) => (),
         v => panic!("Expected ConnAck Success. Found = {:?}", v),
     }

@@ -1,6 +1,4 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-
-use crate::{parse::*, property::PropertyType, reason, Error};
+use crate::{reason, Error, Properties};
 
 pub(crate) mod v4;
 pub(crate) mod v5;
@@ -9,17 +7,27 @@ pub(crate) mod v5;
 ///
 /// The final MQTT packet sent from the client or the server.
 /// It indicates the reason why the network connection is being closed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Disconnect {
     /// Disconnect Reason Code
     pub reason_code: DisconnectReasonCode,
     /// Disconnect Properties
-    pub properties: Option<DisconnectProperties>,
+    pub properties: Properties,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl Disconnect {
+    pub fn new() -> Self {
+        Self {
+            reason_code: DisconnectReasonCode::NormalDisconnection,
+            properties: Properties::new(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum DisconnectReasonCode {
+    #[default]
     /// Close the connection normally. Do not send the Will Message.
     NormalDisconnection = reason::NORMAL_DISCONNECTION,
     /// The Client wishes to disconnect but requires that the Server also publishes its Will Message.
@@ -79,136 +87,6 @@ pub enum DisconnectReasonCode {
     SubscriptionIdentifiersNotSupported = reason::SUBSCRIPTION_IDENTIFIERS_NOT_SUPPORTED,
     /// The Server does not support Wildcard subscription; the subscription is not accepted.
     WildcardSubscriptionsNotSupported = reason::WILDCARD_SUBSCRIPTIONS_NOT_SUPPORTED,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DisconnectProperties {
-    /// Session Expiry Interval in seconds
-    pub session_expiry_interval: Option<u32>,
-    /// Human readable reason for the disconnect
-    pub reason_string: Option<String>,
-    /// List of user properties
-    pub user_properties: Vec<(String, String)>,
-    /// String which can be used by the Client to identify another Server to use.
-    pub server_reference: Option<String>,
-}
-
-impl Disconnect {
-    pub fn new() -> Self {
-        Self {
-            reason_code: DisconnectReasonCode::NormalDisconnection,
-            properties: None,
-        }
-    }
-}
-
-impl Default for Disconnect {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DisconnectProperties {
-    fn len(&self) -> Result<VarInt, Error> {
-        let mut length = 0;
-
-        if self.session_expiry_interval.is_some() {
-            length += 1 + 4;
-        }
-
-        if let Some(reason) = &self.reason_string {
-            length += 1 + 2 + reason.len();
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            length += 1 + 2 + key.len() + 2 + value.len();
-        }
-
-        if let Some(server_reference) = &self.server_reference {
-            length += 1 + 2 + server_reference.len();
-        }
-
-        VarInt::new(length)
-    }
-
-    pub fn read(bytes: &mut Bytes) -> Result<Option<Self>, Error> {
-        let mut session_expiry_interval = None;
-        let mut reason_string = None;
-        let mut user_properties = Vec::new();
-        let mut server_reference = None;
-
-        let properties_len = VarInt::read(bytes.iter())?;
-        bytes.advance(properties_len.length());
-        if properties_len == 0 {
-            return Ok(None);
-        }
-
-        let mut cursor = 0;
-        // read until cursor reaches property length. properties_len = 0 will skip this loop
-        while properties_len > cursor {
-            let prop = read_u8(bytes)?;
-            cursor += 1;
-
-            match prop.try_into()? {
-                PropertyType::SessionExpiryInterval => {
-                    session_expiry_interval = Some(read_u32(bytes)?);
-                    cursor += 4;
-                }
-                PropertyType::ReasonString => {
-                    let reason = read_mqtt_string(bytes)?;
-                    cursor += 2 + reason.len();
-                    reason_string = Some(reason);
-                }
-                PropertyType::UserProperty => {
-                    let key = read_mqtt_string(bytes)?;
-                    let value = read_mqtt_string(bytes)?;
-                    cursor += 2 + key.len() + 2 + value.len();
-                    user_properties.push((key, value));
-                }
-                PropertyType::ServerReference => {
-                    let reference = read_mqtt_string(bytes)?;
-                    cursor += 2 + reference.len();
-                    server_reference = Some(reference);
-                }
-                _ => return Err(Error::InvalidPropertyType(prop)),
-            }
-        }
-
-        Ok(Some(Self {
-            session_expiry_interval,
-            reason_string,
-            user_properties,
-            server_reference,
-        }))
-    }
-
-    fn write(&self, buffer: &mut BytesMut) -> Result<(), Error> {
-        let len = self.len()?;
-        len.write(buffer);
-
-        if let Some(session_expiry_interval) = self.session_expiry_interval {
-            buffer.put_u8(PropertyType::SessionExpiryInterval as u8);
-            buffer.put_u32(session_expiry_interval);
-        }
-
-        if let Some(reason) = &self.reason_string {
-            buffer.put_u8(PropertyType::ReasonString as u8);
-            write_mqtt_string(buffer, reason);
-        }
-
-        for (key, value) in self.user_properties.iter() {
-            buffer.put_u8(PropertyType::UserProperty as u8);
-            write_mqtt_string(buffer, key);
-            write_mqtt_string(buffer, value);
-        }
-
-        if let Some(reference) = &self.server_reference {
-            buffer.put_u8(PropertyType::ServerReference as u8);
-            write_mqtt_string(buffer, reference);
-        }
-
-        Ok(())
-    }
 }
 
 impl TryFrom<u8> for DisconnectReasonCode {

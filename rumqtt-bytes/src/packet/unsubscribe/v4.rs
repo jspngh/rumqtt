@@ -1,7 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use super::Unsubscribe;
-use crate::{parse::*, Error, FixedHeader};
+use crate::{parse::*, Error, FixedHeader, Properties};
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, Error> {
     let pkid = read_u16(&mut bytes)?;
@@ -19,7 +19,7 @@ pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe,
     Ok(Unsubscribe {
         pkid,
         filters,
-        properties: None,
+        properties: Properties::new(),
     })
 }
 

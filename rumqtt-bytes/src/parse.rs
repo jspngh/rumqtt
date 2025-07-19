@@ -79,12 +79,12 @@ impl VarInt {
     }
 
     /// The numeric value of the variable byte integer
-    pub fn value(&self) -> usize {
+    pub const fn value(&self) -> usize {
         self.value as usize
     }
 
     /// The number of bytes required to encode this variable byte integer
-    pub fn length(&self) -> usize {
+    pub const fn length(&self) -> usize {
         self.length as usize
     }
 

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use rumqtt_bytes::{ConnectProperties, LastWill, Login};
+use bytes::Bytes;
+use rumqtt_bytes::{LastWill, Login, Properties, Property};
 
 use super::{ConnectOptions, MqttOptions, NetworkOptions};
 use crate::{TlsConfiguration, Transport};
@@ -23,17 +24,26 @@ pub struct OptionBuilder {
     transport: Transport,
     broker_addr: String,
     port: u16,
+
+    // TODO: split this off into separate builder
     client_id: Option<String>,
     keep_alive: Duration,
     clean_start: bool,
     credentials: Option<Login>,
+    last_will: Option<LastWill>,
+    session_expiry_interval: Option<u32>,
+    topic_alias_maximum: Option<u16>,
+    request_response_information: Option<bool>,
+    request_problem_information: Option<bool>,
+    user_properties: Vec<(String, String)>,
+    authentication_method: Option<String>,
+    authentication_data: Option<Bytes>,
+
     max_packet_size_in: u32,
     max_packet_size_out: u32,
     receive_max_in: u16,
     receive_max_out: u16,
     pending_throttle: Duration,
-    last_will: Option<LastWill>,
-    connect_properties: Option<ConnectProperties>,
     manual_acks: bool,
     #[cfg(feature = "proxy")]
     proxy: Option<Proxy>,
@@ -88,13 +98,19 @@ impl OptionBuilder {
             keep_alive: Duration::from_secs(60),
             clean_start: true,
             credentials: None,
+            last_will: None,
+            session_expiry_interval: None,
+            topic_alias_maximum: None,
+            request_response_information: None,
+            request_problem_information: None,
+            user_properties: Vec::new(),
+            authentication_method: None,
+            authentication_data: None,
             max_packet_size_in: 10 * 1024,
             max_packet_size_out: 10 * 1024,
             receive_max_in: 100,
             receive_max_out: 100,
             pending_throttle: Duration::from_micros(0),
-            last_will: None,
-            connect_properties: None,
             manual_acks: false,
             #[cfg(feature = "proxy")]
             proxy: None,
@@ -153,12 +169,39 @@ impl OptionBuilder {
             #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
             bind_device: self.bind_device,
         };
+
+        let mut connect_properties = Properties::new();
+        connect_properties.add(Property::ReceiveMaximum(self.receive_max_in));
+        connect_properties.add(Property::MaximumPacketSize(self.max_packet_size_in));
+
+        if let Some(interval) = self.session_expiry_interval {
+            connect_properties.add(Property::SessionExpiryInterval(interval));
+        }
+        if let Some(x) = self.topic_alias_maximum {
+            connect_properties.add(Property::TopicAliasMaximum(x));
+        }
+        if let Some(x) = self.request_response_information {
+            connect_properties.add(Property::RequestResponseInformation(x));
+        }
+        if let Some(x) = self.request_problem_information {
+            connect_properties.add(Property::RequestProblemInformation(x));
+        }
+        for (name, value) in self.user_properties {
+            connect_properties.add(Property::UserProperty { name, value });
+        }
+        if let Some(x) = self.authentication_method {
+            connect_properties.add(Property::AuthenticationMethod(x));
+        }
+        if let Some(x) = self.authentication_data {
+            connect_properties.add(Property::AuthenticationData(x));
+        }
+
         let connect_options = ConnectOptions {
             client_id,
             clean_start: self.clean_start,
             credentials: self.credentials,
             last_will: self.last_will,
-            properties: self.connect_properties,
+            properties: connect_properties,
         };
 
         MqttOptions {
@@ -265,17 +308,7 @@ impl OptionBuilder {
     /// This specifies the duration in seconds for which the session
     /// should be maintained by the broker after the client disconnects.
     pub fn session_expiry_interval(mut self, interval: u32) -> Self {
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.session_expiry_interval = Some(interval);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    session_expiry_interval: Some(interval),
-                    ..Default::default()
-                });
-            }
-        }
+        self.session_expiry_interval = Some(interval);
         self
     }
 
@@ -285,17 +318,6 @@ impl OptionBuilder {
     /// that the client is willing to process concurrently.
     pub fn receive_maximum(mut self, recv_max: u16) -> Self {
         self.receive_max_in = recv_max;
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.receive_maximum = Some(recv_max);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    receive_maximum: Some(recv_max),
-                    ..Default::default()
-                });
-            }
-        }
         self
     }
 
@@ -305,17 +327,6 @@ impl OptionBuilder {
     /// This value will be capped to 256MB, which is the maximum allowed by the protocol.
     pub fn max_packet_size(mut self, max_size: u32) -> Self {
         self.max_packet_size_in = std::cmp::min(max_size, 256 * 1024 * 1024);
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.max_packet_size = Some(max_size);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    max_packet_size: Some(max_size),
-                    ..Default::default()
-                });
-            }
-        }
         self
     }
 
@@ -323,17 +334,7 @@ impl OptionBuilder {
     ///
     /// This is the highest value that the client will accept as a Topic Alias sent by the server.
     pub fn topic_alias_max(mut self, topic_alias_max: u16) -> Self {
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.topic_alias_max = Some(topic_alias_max);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    topic_alias_max: Some(topic_alias_max),
-                    ..Default::default()
-                });
-            }
-        }
+        self.topic_alias_maximum = Some(topic_alias_max);
         self
     }
 
@@ -341,18 +342,7 @@ impl OptionBuilder {
     ///
     /// This requests the server to return *response information* in the connack packet.
     pub fn request_response_info(mut self) -> Self {
-        let request_response_info = Some(1);
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.request_response_info = request_response_info;
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    request_response_info,
-                    ..Default::default()
-                });
-            }
-        }
+        self.request_problem_information = Some(true);
         self
     }
 
@@ -364,66 +354,25 @@ impl OptionBuilder {
     /// When passing `false`, the server may only include a *reason string* or *user properties*
     /// in case of publish, connack or disconnect.
     pub fn request_problem_info(mut self, problem_info: bool) -> Self {
-        let request_problem_info = if problem_info { Some(1) } else { Some(0) };
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.request_problem_info = request_problem_info;
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    request_problem_info,
-                    ..Default::default()
-                });
-            }
-        }
+        self.request_problem_information = Some(problem_info);
         self
     }
 
     /// Set user properties to be used in connect packets.
     pub fn user_properties(mut self, user_properties: Vec<(String, String)>) -> Self {
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.user_properties = user_properties;
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    user_properties,
-                    ..Default::default()
-                });
-            }
-        }
+        self.user_properties = user_properties;
         self
     }
 
     /// Set the `Authentication Method` connect property.
     pub fn authentication_method(mut self, method: String) -> Self {
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.authentication_method = Some(method);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    authentication_method: Some(method),
-                    ..Default::default()
-                });
-            }
-        }
+        self.authentication_method = Some(method);
         self
     }
 
     /// Set the `Authentication Data` connect property.
     pub fn authentication_data(mut self, data: bytes::Bytes) -> Self {
-        match self.connect_properties {
-            Some(ref mut conn_props) => {
-                conn_props.authentication_data = Some(data);
-            }
-            None => {
-                self.connect_properties = Some(ConnectProperties {
-                    authentication_data: Some(data),
-                    ..Default::default()
-                });
-            }
-        }
+        self.authentication_data = Some(data);
         self
     }
 }

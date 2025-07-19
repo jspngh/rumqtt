@@ -1,7 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
 use super::Publish;
-use crate::{parse::*, Error, FixedHeader, QoS};
+use crate::{parse::*, Error, FixedHeader, Properties, QoS};
 
 pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Error> {
     let dup = (fixed_header.flags() & 0b1000) != 0;
@@ -27,7 +27,7 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Publish, Erro
         pkid,
         topic,
         payload: bytes,
-        properties: None,
+        properties: Properties::new(),
     };
 
     Ok(publish)
@@ -114,7 +114,7 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 10,
                 payload: Bytes::from(&payload[..]),
-                properties: None,
+                properties: Properties::new(),
             })
         );
     }
@@ -149,7 +149,7 @@ mod test {
                 topic: "a/b".to_owned(),
                 pkid: 0,
                 payload: Bytes::from(&[0x01, 0x02][..]),
-                properties: None,
+                properties: Properties::new(),
             })
         );
     }
@@ -163,7 +163,7 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 10,
             payload: Bytes::from(vec![0xF1, 0xF2, 0xF3, 0xF4]),
-            properties: None,
+            properties: Properties::new(),
         };
 
         let mut buf = BytesMut::new();
@@ -198,7 +198,7 @@ mod test {
             topic: "a/b".to_owned(),
             pkid: 0,
             payload: Bytes::from(vec![0xE1, 0xE2, 0xE3, 0xE4]),
-            properties: None,
+            properties: Properties::new(),
         };
 
         let mut buf = BytesMut::new();

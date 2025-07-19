@@ -1,7 +1,14 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::{PubAck, PubAckProperties, PubAckReasonCode};
-use crate::{parse::*, Error, FixedHeader};
+use super::{PubAck, PubAckReasonCode};
+use crate::{
+    parse::*,
+    property::{Properties, PropertyType},
+    Error, FixedHeader,
+};
+
+const ALLOWED_PROPERTIES: &[PropertyType] =
+    &[PropertyType::ReasonString, PropertyType::UserProperty];
 
 pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubAck, Error> {
     let pkid = read_u16(&mut bytes)?;
@@ -17,14 +24,14 @@ pub fn read(fixed_header: FixedHeader, mut bytes: Bytes) -> Result<PubAck, Error
         return Ok(PubAck {
             pkid,
             reason: ack_reason.try_into()?,
-            properties: None,
+            properties: Properties::new(),
         });
     }
 
     Ok(PubAck {
         pkid,
         reason: ack_reason.try_into()?,
-        properties: PubAckProperties::read(&mut bytes)?,
+        properties: Properties::read(&mut bytes, ALLOWED_PROPERTIES)?,
     })
 }
 
@@ -41,11 +48,7 @@ pub fn write(packet: &PubAck, buffer: &mut BytesMut) -> Result<usize, Error> {
         // reason code
         buffer.put_u8(packet.reason as u8);
         // properties
-        if let Some(p) = &packet.properties {
-            p.write(buffer)?;
-        } else {
-            buffer.put_u8(0);
-        }
+        packet.properties.write(buffer)?;
     }
 
     Ok(1 + len.length() + len.value())
@@ -54,19 +57,15 @@ pub fn write(packet: &PubAck, buffer: &mut BytesMut) -> Result<usize, Error> {
 pub fn len(packet: &PubAck) -> Result<VarInt, Error> {
     let mut len = 2; // packet identifier
 
-    if packet.reason == PubAckReasonCode::Success && packet.properties.is_none() {
+    if packet.reason == PubAckReasonCode::Success && packet.properties.is_empty() {
         // Reason code and property length can be omitted in this case
         return VarInt::new(len);
     }
 
     len += 1; // reason code
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     VarInt::new(len)
 }
@@ -81,21 +80,22 @@ mod test {
         size_from_len,
         tests::{USER_PROP_KEY, USER_PROP_VAL},
     };
+    use crate::{properties, Property};
 
     #[test]
     fn length_calculation() {
         let mut dummy_bytes = BytesMut::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        let puback_props = PubAckProperties {
-            reason_string: None,
-            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
-        };
+        let properties = properties![Property::UserProperty {
+            name: USER_PROP_KEY.into(),
+            value: USER_PROP_VAL.into(),
+        }];
 
         let puback_pkt = PubAck {
             pkid: 1,
             reason: PubAckReasonCode::Success,
-            properties: Some(puback_props),
+            properties,
         };
 
         let size_from_size = size_from_len(len(&puback_pkt).unwrap());

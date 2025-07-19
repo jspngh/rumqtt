@@ -1,11 +1,17 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-use super::{Unsubscribe, UnsubscribeProperties};
-use crate::{parse::*, Error, FixedHeader};
+use super::Unsubscribe;
+use crate::{
+    parse::*,
+    property::{Properties, PropertyType},
+    Error, FixedHeader,
+};
+
+const ALLOWED_PROPERTIES: &[PropertyType] = &[PropertyType::UserProperty];
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Unsubscribe, Error> {
     let pkid = read_u16(&mut bytes)?;
-    let properties = UnsubscribeProperties::read(&mut bytes)?;
+    let properties = Properties::read(&mut bytes, ALLOWED_PROPERTIES)?;
 
     if !bytes.has_remaining() {
         return Err(Error::MalformedPacket);
@@ -32,13 +38,8 @@ pub fn write(packet: &Unsubscribe, buffer: &mut BytesMut) -> Result<usize, Error
     len.write(buffer);
     // packet identifier
     buffer.put_u16(packet.pkid);
-
     // properties
-    if let Some(p) = &packet.properties {
-        p.write(buffer)?;
-    } else {
-        buffer.put_u8(0);
-    }
+    packet.properties.write(buffer)?;
 
     // topic filters
     for filter in packet.filters.iter() {
@@ -53,12 +54,8 @@ pub fn len(packet: &Unsubscribe) -> Result<VarInt, Error> {
     // hence 2 is prefixed for len per filter)
     let mut len = 2 + packet.filters.iter().fold(0, |s, t| s + 2 + t.len());
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     VarInt::new(len)
 }
@@ -73,20 +70,22 @@ mod test {
         size_from_len,
         tests::{USER_PROP_KEY, USER_PROP_VAL},
     };
+    use crate::{properties, Property};
 
     #[test]
     fn length_calculation() {
         let mut dummy_bytes = BytesMut::new();
         // Use user_properties to pad the size to exceed ~128 bytes to make the
         // remaining_length field in the packet be 2 bytes long.
-        let unsubscribe_props = UnsubscribeProperties {
-            user_properties: vec![(USER_PROP_KEY.into(), USER_PROP_VAL.into())],
-        };
+        let properties = properties![Property::UserProperty {
+            name: USER_PROP_KEY.into(),
+            value: USER_PROP_VAL.into(),
+        }];
 
         let unsubscribe_pkt = Unsubscribe {
             pkid: 1,
             filters: vec!["hello/world".into()],
-            properties: Some(unsubscribe_props),
+            properties,
         };
 
         let size_from_size = size_from_len(len(&unsubscribe_pkt).unwrap());

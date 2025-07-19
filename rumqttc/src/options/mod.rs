@@ -2,7 +2,7 @@ use std::time::Duration;
 #[cfg(feature = "websocket")]
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use rumqtt_bytes::{ConnectProperties, LastWill, Login};
+use rumqtt_bytes::{LastWill, Login, Properties};
 
 use crate::Transport;
 
@@ -39,7 +39,7 @@ pub struct ConnectOptions {
     /// Last will that will be issued on unexpected disconnect
     pub(crate) last_will: Option<LastWill>,
     /// Properties to use when sending a connect packet
-    pub(crate) properties: Option<ConnectProperties>,
+    pub(crate) properties: Properties,
 }
 
 /// Options to configure the MQTT client behaviour

@@ -1,12 +1,20 @@
 use bytes::{BufMut, Bytes, BytesMut};
 
-use super::{Auth, AuthProperties};
+use super::Auth;
 use crate::parse::*;
+use crate::property::{Properties, PropertyType};
 use crate::{Error, FixedHeader};
+
+const ALLOWED_PROPERTIES: &[PropertyType] = &[
+    PropertyType::AuthenticationMethod,
+    PropertyType::AuthenticationData,
+    PropertyType::ReasonString,
+    PropertyType::UserProperty,
+];
 
 pub fn read(_fixed_header: FixedHeader, mut bytes: Bytes) -> Result<Auth, Error> {
     let code = read_u8(&mut bytes)?;
-    let properties = AuthProperties::read(&mut bytes)?;
+    let properties = Properties::read(&mut bytes, ALLOWED_PROPERTIES)?;
     let auth = Auth {
         code: code.try_into()?,
         properties,
@@ -23,13 +31,8 @@ pub fn write(packet: &Auth, buffer: &mut BytesMut) -> Result<usize, Error> {
     len.write(buffer);
     // reason code
     buffer.put_u8(packet.code as u8);
-
     // properties
-    if let Some(p) = &packet.properties {
-        p.write(buffer)?;
-    } else {
-        buffer.put_u8(0);
-    }
+    packet.properties.write(buffer)?;
 
     Ok(1 + len.length() + len.value())
 }
@@ -37,12 +40,8 @@ pub fn write(packet: &Auth, buffer: &mut BytesMut) -> Result<usize, Error> {
 pub fn len(packet: &Auth) -> Result<VarInt, Error> {
     let mut len = 1; // reason code
 
-    if let Some(p) = &packet.properties {
-        let properties_len = p.len()?;
-        len += properties_len.length() + properties_len.value();
-    } else {
-        len += 1; // 0 property length
-    }
+    let properties_len = packet.properties.len()?;
+    len += properties_len.length() + properties_len.value();
 
     VarInt::new(len)
 }
