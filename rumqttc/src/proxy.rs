@@ -1,8 +1,8 @@
-use crate::eventloop::socket_connect;
-use crate::framed::AsyncReadWrite;
-use crate::NetworkOptions;
-
 use std::io;
+
+use crate::framed::AsyncReadWrite;
+use crate::transport::socket;
+use crate::NetworkOptions;
 
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::{tls, TlsConfiguration};
@@ -42,20 +42,19 @@ pub enum ProxyError {
 
 impl Proxy {
     pub(crate) async fn connect(
-        self,
+        &self,
         broker_addr: &str,
         broker_port: u16,
         network_options: &NetworkOptions,
     ) -> Result<Box<dyn AsyncReadWrite>, ProxyError> {
         let proxy_addr = format!("{}:{}", self.addr, self.port);
 
-        let tcp: Box<dyn AsyncReadWrite> =
-            Box::new(socket_connect(proxy_addr, network_options).await?);
+        let tcp: Box<dyn AsyncReadWrite> = Box::new(socket(proxy_addr, network_options).await?);
         let mut tcp = match self.ty {
             ProxyType::Http => tcp,
             #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
-            ProxyType::Https(tls_config) => {
-                tls::tls_connect(&self.addr, self.port, &tls_config, tcp).await?
+            ProxyType::Https(ref tls_config) => {
+                tls::tls_connect(&self.addr, self.port, tls_config, tcp).await?
             }
         };
         self.auth.auth(broker_addr, broker_port, &mut tcp).await?;
@@ -65,7 +64,7 @@ impl Proxy {
 
 impl ProxyAuth {
     async fn auth(
-        self,
+        &self,
         host: &str,
         port: u16,
         tcp_stream: &mut Box<dyn AsyncReadWrite>,
@@ -74,7 +73,7 @@ impl ProxyAuth {
             Self::None => async_http_proxy::http_connect_tokio(tcp_stream, host, port).await?,
             Self::Basic { username, password } => {
                 async_http_proxy::http_connect_tokio_with_basic_auth(
-                    tcp_stream, host, port, &username, &password,
+                    tcp_stream, host, port, username, password,
                 )
                 .await?
             }

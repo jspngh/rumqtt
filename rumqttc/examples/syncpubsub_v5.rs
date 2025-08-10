@@ -18,14 +18,13 @@ fn main() {
     thread::spawn(move || publish(client));
 
     for (i, notification) in connection.iter().enumerate() {
-        match notification {
-            Err(ConnectionError::Io(error))
-                if error.kind() == std::io::ErrorKind::ConnectionRefused =>
-            {
-                println!("Failed to connect to the server. Make sure correct client is configured properly!\nError: {error:?}");
-                return;
-            }
-            _ => {}
+        if let Err(ConnectionError::Transport(error)) = notification {
+            println!(
+                "Failed to connect to the server. \
+                 Make sure correct client is configured properly! \
+                 Error: {error:?}"
+            );
+            return;
         }
         println!("{i}. Notification = {notification:?}");
     }

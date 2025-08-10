@@ -288,8 +288,7 @@ impl MqttState {
                 }
                 rumqtt_bytes::Property::ReceiveMaximum(max) => {
                     self.max_outgoing_inflight = max.min(self.max_outgoing_inflight_upper_limit);
-                    // FIXME: Maybe resize the pubrec and pubrel queues here
-                    // to save some space.
+                    // FIXME: Maybe resize the pubrec and pubrel queues here to save some space.
                 }
                 _ => {}
             }

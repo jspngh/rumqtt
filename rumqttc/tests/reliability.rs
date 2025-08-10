@@ -118,11 +118,11 @@ fn test_valid_keep_alive_values() {
 
 #[tokio::test]
 async fn idle_connection_triggers_pings_on_time() {
-    let keep_alive = 1;
+    let keep_alive = Duration::from_secs(1);
 
     let options = OptionBuilder::new_tcp("127.0.0.1", 1885)
         .client_id("dummy")
-        .keep_alive(Duration::from_secs(keep_alive))
+        .keep_alive(keep_alive)
         .finalize();
 
     // Create client eventloop and poll
@@ -141,12 +141,12 @@ async fn idle_connection_triggers_pings_on_time() {
             Packet::PingReq(_) => {
                 count += 1;
                 let elapsed = start.elapsed();
-                assert_eq!(elapsed.as_secs(), { keep_alive });
+                assert!(elapsed.abs_diff(keep_alive) < Duration::from_millis(10));
                 broker.pingresp().await;
                 start = Instant::now();
             }
             _ => {
-                panic!("Expecting ping, Received: {:?}", packet);
+                panic!("Expecting ping, Received: {packet:?}");
             }
         }
     }
@@ -156,10 +156,10 @@ async fn idle_connection_triggers_pings_on_time() {
 
 #[tokio::test]
 async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
-    let keep_alive = 5;
+    let keep_alive = Duration::from_secs(5);
     let options = OptionBuilder::new_tcp("127.0.0.1", 1886)
         .client_id("dummy")
-        .keep_alive(Duration::from_secs(keep_alive))
+        .keep_alive(keep_alive)
         .finalize();
 
     // start sending qos0 publishes. this makes sure that there is
@@ -190,7 +190,8 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), { keep_alive });
+            let elapsed = start.elapsed();
+            assert!(elapsed.abs_diff(keep_alive) < Duration::from_millis(10));
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -201,10 +202,10 @@ async fn some_outgoing_and_no_incoming_should_trigger_pings_on_time() {
 
 #[tokio::test]
 async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
-    let keep_alive = 5;
+    let keep_alive = Duration::from_secs(5);
     let options = OptionBuilder::new_tcp("127.0.0.1", 2000)
         .client_id("dummy")
-        .keep_alive(Duration::from_secs(keep_alive))
+        .keep_alive(keep_alive)
         .finalize();
 
     task::spawn(async move {
@@ -230,7 +231,8 @@ async fn some_incoming_and_no_outgoing_should_trigger_pings_on_time() {
                 break;
             }
 
-            assert_eq!(start.elapsed().as_secs(), { keep_alive });
+            let elapsed = start.elapsed();
+            assert!(elapsed.abs_diff(keep_alive) < Duration::from_millis(10));
             broker.pingresp().await;
             start = Instant::now();
         }
@@ -259,7 +261,7 @@ async fn detects_halfopen_connections_in_the_second_ping_request() {
         if let Err(e) = eventloop.poll().await {
             match e {
                 ConnectionError::MqttState(StateError::AwaitPingResp) => break,
-                v => panic!("Expecting pingresp error. Found = {:?}", v),
+                v => panic!("Expecting pingresp error. Found = {v:?}"),
             }
         }
     }
@@ -476,7 +478,7 @@ async fn next_poll_after_connect_failure_reconnects() {
 
     match eventloop.poll().await {
         Err(ConnectionError::ConnectionRefused(ConnectReasonCode::BadUserNamePassword)) => (),
-        v => panic!("Expected bad username password error. Found = {:?}", v),
+        v => panic!("Expected bad username password error. Found = {v:?}"),
     }
 
     match eventloop.poll().await {
@@ -485,7 +487,7 @@ async fn next_poll_after_connect_failure_reconnects() {
             code: ConnectReasonCode::Success,
             properties: _,
         }))) => (),
-        v => panic!("Expected ConnAck Success. Found = {:?}", v),
+        v => panic!("Expected ConnAck Success. Found = {v:?}"),
     }
 }
 

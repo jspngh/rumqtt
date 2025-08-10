@@ -148,8 +148,8 @@ impl MqttOptions {
     }
 
     #[cfg(feature = "proxy")]
-    pub fn proxy(&self) -> Option<crate::Proxy> {
-        self.proxy.clone()
+    pub fn proxy(&self) -> Option<&crate::Proxy> {
+        self.proxy.as_ref()
     }
 
     #[cfg(feature = "websocket")]
