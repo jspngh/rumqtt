@@ -8,7 +8,7 @@ use rumqtt_bytes::{
     PubRelReasonCode, Publish, SubAck, Subscribe, SubscribeReasonCode, UnsubAck, Unsubscribe,
     UnsubscribeReasonCode,
 };
-use rumqtt_bytes::{Error as MqttError, Properties, QoS};
+use rumqtt_bytes::{Properties, QoS};
 
 use crate::{Event, Outgoing, Packet};
 
@@ -37,13 +37,9 @@ pub enum StateError {
     #[error("A Subscribe packet must contain atleast one filter")]
     EmptySubscription,
     #[error("Mqtt serialization/deserialization error: {0}")]
-    Deserialization(MqttError),
+    Deserialization(#[from] rumqtt_bytes::Error),
     #[error("Cannot use topic alias '{alias:?}': greater than broker maximum '{max:?}'")]
     InvalidAlias { alias: u16, max: u16 },
-    #[error("Cannot send packet of size '{pkt_size:?}': greater than broker maximum '{max:?}'")]
-    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
-    #[error("Cannot receive packet of size '{pkt_size:?}': greater than client maximum '{max:?}'")]
-    IncomingPacketTooLarge { pkt_size: usize, max: usize },
     #[error("Server sent disconnect with reason `{reason_string:?}` and code '{reason_code:?}'")]
     ServerDisconnect {
         reason_code: DisconnectReasonCode,
@@ -53,17 +49,6 @@ pub enum StateError {
     ConnFail { reason: ConnectReasonCode },
     #[error("Connection closed by peer abruptly")]
     ConnectionAborted,
-}
-
-impl From<MqttError> for StateError {
-    fn from(value: MqttError) -> Self {
-        match value {
-            MqttError::OutgoingPacketTooLarge { pkt_size, max } => {
-                StateError::OutgoingPacketTooLarge { pkt_size, max }
-            }
-            e => StateError::Deserialization(e),
-        }
-    }
 }
 
 /// State of the mqtt connection.

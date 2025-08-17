@@ -31,12 +31,12 @@ pub enum Error {
     PayloadSizeIncorrect,
     #[error("Payload is too long")]
     PayloadTooLong,
-    #[error("Max Payload size of {max:?} has been exceeded by packet of {pkt_size:?} bytes")]
+    #[error("Incoming packet of size '{pkt_size:?}' exceeds our maximum packet size '{max:?}'")]
     PayloadSizeLimitExceeded { pkt_size: u32, max: u32 },
+    #[error("Outgoing packet of size '{pkt_size:?}' exceeds broker maximum packet size '{max:?}'")]
+    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
     #[error("Payload is required")]
     PayloadRequired,
-    #[error("String is not UTF-8 encoded = {0}")]
-    Utf8Encoding(#[from] std::str::Utf8Error),
     #[error("Promised boundary crossed, contains {0} bytes")]
     BoundaryCrossed(usize),
     #[error("Packet is malformed")]
@@ -45,13 +45,13 @@ pub enum Error {
     MalformedRemainingLength,
     #[error("Invalid property type = {0}")]
     InvalidPropertyType(u8),
-    /// More bytes required to frame packet. Argument
-    /// implies minimum additional bytes required to
-    /// proceed further
+    /// More bytes required to frame packet.
+    ///
+    /// Argument implies minimum additional bytes required to proceed further.
     #[error("Insufficient number of bytes to frame packet, {0} more bytes required")]
     InsufficientBytes(usize),
+    #[error("String is not UTF-8 encoded = {0}")]
+    Utf8Encoding(#[from] std::str::Utf8Error),
     #[error("IO: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Cannot send packet of size '{pkt_size:?}'. It's greater than the broker's maximum packet size of: '{max:?}'")]
-    OutgoingPacketTooLarge { pkt_size: u32, max: u32 },
 }
